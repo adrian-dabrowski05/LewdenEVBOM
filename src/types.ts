@@ -90,9 +90,9 @@ export interface QuoteFormData {
   customer_name: string
   notes: string
   labour_minutes: string
-  labour_rate_per_min: string
 }
 
 export interface AppSettings {
   hardware_uplift_pct: number
+  labour_rate_per_min: number
 }
