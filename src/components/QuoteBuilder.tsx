@@ -171,7 +171,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
       labourRatePerMin: labourRate,
       labourTotal,
       grandTotal,
-      baseUrl: import.meta.env.BASE_URL,
+      baseUrl: (import.meta as any).env.BASE_URL,
     })
   }
 
