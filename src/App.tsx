@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
-import type { Product, Quote, View, QuantityMap, QuoteFormData } from './types'
+import type { Product, Quote, Preset, View, QuantityMap, QuoteFormData } from './types'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -19,15 +19,14 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminLogin, setShowAdminLogin] = useState(false)
 
-  // Products
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
 
-  // Quotes
+  const [presets, setPresets] = useState<Preset[]>([])
+
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
 
-  // Quote builder state
   const [quantities, setQuantities] = useState<QuantityMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>({
     project_name: '',
@@ -35,7 +34,6 @@ export default function App() {
     notes: '',
   })
 
-  // Toast
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
@@ -44,9 +42,7 @@ export default function App() {
   }, [])
 
   // ── Load products ──────────────────────────────────────────
-  useEffect(() => {
-    loadProducts()
-  }, [])
+  useEffect(() => { loadProducts() }, [])
 
   const loadProducts = async () => {
     setProductsLoading(true)
@@ -55,13 +51,34 @@ export default function App() {
       .select('*')
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
-    if (error) {
-      showToast('Failed to load products', 'error')
-    } else {
-      setProducts(data || [])
-    }
+    if (error) showToast('Failed to load products', 'error')
+    else setProducts(data || [])
     setProductsLoading(false)
   }
+
+  // ── Load presets ───────────────────────────────────────────
+  useEffect(() => { loadPresets() }, [])
+
+  const loadPresets = async () => {
+    const { data, error } = await supabase
+      .from('presets')
+      .select('*, preset_items(*)')
+      .order('created_at', { ascending: true })
+    if (!error) setPresets(data || [])
+  }
+
+  // ── Apply preset ───────────────────────────────────────────
+  const applyPreset = useCallback((preset: Preset) => {
+    if (!preset.preset_items?.length) return
+    setQuantities((prev) => {
+      const next = { ...prev }
+      preset.preset_items!.forEach((item) => {
+        next[item.product_id] = (next[item.product_id] ?? 0) + item.quantity
+      })
+      return next
+    })
+    showToast(`Preset "${preset.name}" applied`)
+  }, [showToast])
 
   // ── Load quotes ────────────────────────────────────────────
   const loadQuotes = useCallback(async () => {
@@ -70,25 +87,17 @@ export default function App() {
       .from('quotes')
       .select('*, quote_items(*)')
       .order('created_at', { ascending: false })
-    if (error) {
-      showToast('Failed to load quotes', 'error')
-    } else {
-      setQuotes(data || [])
-    }
+    if (error) showToast('Failed to load quotes', 'error')
+    else setQuotes(data || [])
     setQuotesLoading(false)
   }, [showToast])
 
-  useEffect(() => {
-    if (view === 'quotes') loadQuotes()
-  }, [view, loadQuotes])
+  useEffect(() => { if (view === 'quotes') loadQuotes() }, [view, loadQuotes])
 
   // ── Save quote ─────────────────────────────────────────────
   const saveQuote = async (formData: QuoteFormData): Promise<boolean> => {
     const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
-    if (activeItems.length === 0) {
-      showToast('Add at least one item before saving', 'error')
-      return false
-    }
+    if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
     const grandTotal = activeItems.reduce((sum, p) => {
       const qty = quantities[p.id] ?? 0
@@ -107,10 +116,7 @@ export default function App() {
       .select()
       .single()
 
-    if (quoteError || !quoteData) {
-      showToast('Failed to save quote', 'error')
-      return false
-    }
+    if (quoteError || !quoteData) { showToast('Failed to save quote', 'error'); return false }
 
     const items = activeItems.map((p) => ({
       quote_id: quoteData.id,
@@ -123,11 +129,7 @@ export default function App() {
     }))
 
     const { error: itemsError } = await supabase.from('quote_items').insert(items)
-
-    if (itemsError) {
-      showToast('Quote saved but items failed to save', 'error')
-      return false
-    }
+    if (itemsError) { showToast('Quote saved but items failed to save', 'error'); return false }
 
     showToast('Quote saved successfully')
     setQuantities({})
@@ -137,33 +139,21 @@ export default function App() {
 
   // ── Update quote status ────────────────────────────────────
   const updateQuoteStatus = async (quoteId: string, status: string) => {
-    const { error } = await supabase
-      .from('quotes')
-      .update({ status })
-      .eq('id', quoteId)
-    if (error) {
-      showToast('Failed to update status', 'error')
-    } else {
-      setQuotes((prev) => prev.map((q) => (q.id === quoteId ? { ...q, status: status as Quote['status'] } : q)))
-    }
+    const { error } = await supabase.from('quotes').update({ status }).eq('id', quoteId)
+    if (error) showToast('Failed to update status', 'error')
+    else setQuotes((prev) => prev.map((q) => q.id === quoteId ? { ...q, status: status as Quote['status'] } : q))
   }
 
   // ── Delete quote ───────────────────────────────────────────
   const deleteQuote = async (quoteId: string) => {
     const { error } = await supabase.from('quotes').delete().eq('id', quoteId)
-    if (error) {
-      showToast('Failed to delete quote', 'error')
-    } else {
-      setQuotes((prev) => prev.filter((q) => q.id !== quoteId))
-      showToast('Quote deleted')
-    }
+    if (error) showToast('Failed to delete quote', 'error')
+    else { setQuotes((prev) => prev.filter((q) => q.id !== quoteId)); showToast('Quote deleted') }
   }
 
   // ── Admin auth ─────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAdmin(!!session)
-    })
+    supabase.auth.getSession().then(({ data: { session } }) => setIsAdmin(!!session))
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAdmin(!!session)
       if (session) setShowAdminLogin(false)
@@ -171,10 +161,7 @@ export default function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  const handleAdminNav = () => {
-    if (isAdmin) setView('admin')
-    else setShowAdminLogin(true)
-  }
+  const handleAdminNav = () => { isAdmin ? setView('admin') : setShowAdminLogin(true) }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -186,11 +173,7 @@ export default function App() {
   // ── Qty helpers ────────────────────────────────────────────
   const setQty = useCallback((productId: string, qty: number) => {
     setQuantities((prev) => {
-      if (qty <= 0) {
-        const next = { ...prev }
-        delete next[productId]
-        return next
-      }
+      if (qty <= 0) { const next = { ...prev }; delete next[productId]; return next }
       return { ...prev, [productId]: qty }
     })
   }, [])
@@ -204,14 +187,7 @@ export default function App() {
 
   return (
     <>
-      <Header
-        view={view}
-        setView={setView}
-        isAdmin={isAdmin}
-        onAdminNav={handleAdminNav}
-        onLogout={handleLogout}
-        activeCount={activeCount}
-      />
+      <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} />
 
       <main className="main">
         {view === 'builder' && (
@@ -225,43 +201,23 @@ export default function App() {
             setQuoteForm={setQuoteForm}
             onSave={saveQuote}
             showToast={showToast}
+            presets={presets}
+            onApplyPreset={applyPreset}
           />
         )}
 
         {view === 'quotes' && (
-          <SavedQuotes
-            quotes={quotes}
-            loading={quotesLoading}
-            onUpdateStatus={updateQuoteStatus}
-            onDelete={deleteQuote}
-            isAdmin={isAdmin}
-          />
+          <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} isAdmin={isAdmin} />
         )}
 
         {view === 'admin' && isAdmin && (
-          <AdminPanel
-            products={products}
-            onRefresh={loadProducts}
-            showToast={showToast}
-          />
+          <AdminPanel products={products} presets={presets} onRefreshProducts={loadProducts} onRefreshPresets={loadPresets} showToast={showToast} />
         )}
       </main>
 
-      <BottomNav
-        view={view}
-        setView={setView}
-        isAdmin={isAdmin}
-        onAdminNav={handleAdminNav}
-        activeCount={activeCount}
-      />
+      <BottomNav view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} activeCount={activeCount} />
 
-      {showAdminLogin && (
-        <AdminLogin
-          onClose={() => setShowAdminLogin(false)}
-          showToast={showToast}
-        />
-      )}
-
+      {showAdminLogin && <AdminLogin onClose={() => setShowAdminLogin(false)} showToast={showToast} />}
       {toast && <Toast message={toast.message} type={toast.type} />}
     </>
   )

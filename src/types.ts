@@ -55,6 +55,22 @@ export interface QuoteItem {
   line_total: number | null
 }
 
+export interface Preset {
+  id: string
+  name: string
+  description: string | null
+  created_at: string
+  updated_at: string
+  preset_items?: PresetItem[]
+}
+
+export interface PresetItem {
+  id: string
+  preset_id: string
+  product_id: string
+  quantity: number
+}
+
 export type View = 'builder' | 'quotes' | 'admin'
 
 export interface QuantityMap {
