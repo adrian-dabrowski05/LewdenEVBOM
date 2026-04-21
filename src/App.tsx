@@ -12,8 +12,7 @@ import Toast from './components/Toast'
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
-  project_name: '', customer_name: '', notes: '',
-  labour_minutes: '', labour_rate_per_min: '',
+  project_name: '', customer_name: '', notes: '', labour_minutes: '',
 }
 
 export default function App() {
@@ -62,7 +61,10 @@ export default function App() {
     if (data) {
       const map: Record<string, string> = {}
       data.forEach((row) => { map[row.key] = row.value })
-      setSettings({ hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5') })
+      setSettings({
+        hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5'),
+        labour_rate_per_min: parseFloat(map['labour_rate_per_min'] ?? '0'),
+      })
     }
   }
 
@@ -107,7 +109,7 @@ export default function App() {
     const upliftPct = settings.hardware_uplift_pct
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
     const labourMinutes = parseFloat(formData.labour_minutes) || 0
-    const labourRate = parseFloat(formData.labour_rate_per_min) || 0
+    const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
 
