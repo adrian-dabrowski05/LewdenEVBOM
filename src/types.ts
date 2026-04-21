@@ -32,10 +32,19 @@ export interface Product {
   updated_at: string
 }
 
+export interface ProductVariant {
+  id: string
+  product_id: string
+  label: string
+  sort_order: number
+  created_at: string
+}
+
 export interface Quote {
   id: string
   project_name: string
   customer_name: string | null
+  mo_number: string | null
   notes: string | null
   grand_total: number
   materials_subtotal: number
@@ -59,6 +68,8 @@ export interface QuoteItem {
   factory_cost: number | null
   quantity: number
   line_total: number | null
+  variant_id: string | null
+  variant_label: string | null
 }
 
 export interface Preset {
@@ -85,9 +96,15 @@ export interface QuantityMap {
   [productId: string]: number
 }
 
+// Maps productId → selected variant id
+export interface VariantSelectionMap {
+  [productId: string]: string
+}
+
 export interface QuoteFormData {
   project_name: string
   customer_name: string
+  mo_number: string
   notes: string
   labour_minutes: string
 }

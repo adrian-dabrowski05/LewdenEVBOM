@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { Product, Preset, PresetItem, Category, AppSettings } from '../types'
+import type { Product, ProductVariant, Preset, PresetItem, Category, AppSettings } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
@@ -8,9 +8,11 @@ interface Props {
   products: Product[]
   presets: Preset[]
   settings: AppSettings
+  variants: ProductVariant[]
   onRefreshProducts: () => void
   onRefreshPresets: () => void
   onRefreshSettings: () => void
+  onRefreshVariants: () => void
   showToast: (msg: string, type?: 'success' | 'error') => void
 }
 
@@ -19,11 +21,95 @@ type AdminTab = 'products' | 'presets' | 'settings'
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
 const emptyBuffer = (): EditBuffer => ({ description: '', category: 'Outgoing', part_number: '', factory_cost: '', notes: '' })
 
+// ── Variant manager for a single product ─────────────────────
+function VariantManager({ product, variants, onRefresh, showToast }: {
+  product: Product
+  variants: ProductVariant[]
+  onRefresh: () => void
+  showToast: Props['showToast']
+}) {
+  const [newLabel, setNewLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const productVariants = variants.filter((v) => v.product_id === product.id).sort((a, b) => a.sort_order - b.sort_order)
+
+  const addVariant = async () => {
+    if (!newLabel.trim()) return
+    setSaving(true)
+    const maxOrder = Math.max(0, ...productVariants.map((v) => v.sort_order))
+    const { error } = await supabase.from('product_variants').insert({
+      product_id: product.id,
+      label: newLabel.trim(),
+      sort_order: maxOrder + 10,
+    })
+    setSaving(false)
+    if (error) { showToast('Failed to add variant', 'error'); return }
+    setNewLabel('')
+    onRefresh()
+  }
+
+  const removeVariant = async (id: string) => {
+    const { error } = await supabase.from('product_variants').delete().eq('id', id)
+    if (error) { showToast('Failed to remove variant', 'error'); return }
+    onRefresh()
+  }
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--brand-light)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--brand)', marginBottom: 8 }}>
+        Variant options {productVariants.length > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, fontWeight: 700, marginLeft: 4 }}>{productVariants.length}</span>}
+      </div>
+
+      {/* Existing variants */}
+      {productVariants.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {productVariants.map((v) => (
+            <div key={v.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--surface)', border: '1px solid var(--brand)', borderRadius: 99, padding: '3px 10px 3px 12px', fontSize: 12, fontWeight: 500, color: 'var(--brand)' }}>
+              {v.label}
+              <button
+                onClick={() => removeVariant(v.id)}
+                style={{ width: 16, height: 16, borderRadius: 99, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, lineHeight: 1, flexShrink: 0 }}
+              >✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add variant */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="input input-sm"
+          placeholder="Add option (e.g. Moss Green)"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVariant() } }}
+          style={{ flex: 1 }}
+        />
+        <button className="btn btn-sm btn-primary" onClick={addVariant} disabled={saving || !newLabel.trim()}>
+          Add
+        </button>
+      </div>
+      {productVariants.length === 0 && (
+        <p style={{ fontSize: 11, color: 'var(--brand)', opacity: 0.7, marginTop: 6 }}>
+          No variants yet. Add options that sales reps will choose from (e.g. colour finishes).
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Products tab ─────────────────────────────────────────────
-function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; onRefresh: () => void; showToast: Props['showToast'] }) {
+function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants, showToast }: {
+  products: Product[]
+  variants: ProductVariant[]
+  onRefreshProducts: () => void
+  onRefreshVariants: () => void
+  showToast: Props['showToast']
+}) {
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBuf, setEditBuf] = useState<EditBuffer>(emptyBuffer())
+  const [showVariantsFor, setShowVariantsFor] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [newBuf, setNewBuf] = useState<EditBuffer>(emptyBuffer())
@@ -33,6 +119,12 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     const q = search.toLowerCase()
     return products.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
   }, [products, search])
+
+  const variantCountByProduct = useMemo(() => {
+    const map: Record<string, number> = {}
+    variants.forEach((v) => { map[v.product_id] = (map[v.product_id] ?? 0) + 1 })
+    return map
+  }, [variants])
 
   const startEdit = (p: Product) => {
     setEditingId(p.id)
@@ -50,14 +142,14 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     }).eq('id', editingId)
     setSaving(false)
     if (error) { showToast('Failed to save changes', 'error'); return }
-    showToast('Product updated'); setEditingId(null); onRefresh()
+    showToast('Product updated'); setEditingId(null); onRefreshProducts()
   }
 
   const deleteProduct = async (id: string) => {
     if (!confirm('Remove this product from the catalogue?')) return
     const { error } = await supabase.from('products').update({ is_active: false }).eq('id', id)
     if (error) { showToast('Failed to remove product', 'error'); return }
-    showToast('Product removed'); onRefresh()
+    showToast('Product removed'); onRefreshProducts()
   }
 
   const saveNew = async () => {
@@ -73,7 +165,7 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     })
     setSaving(false)
     if (error) { showToast('Failed to add product', 'error'); return }
-    showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefresh()
+    showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefreshProducts()
   }
 
   const EditRow = ({ buf, onBuf }: { buf: EditBuffer; onBuf: (b: EditBuffer) => void }) => (
@@ -90,13 +182,10 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     <>
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search catalogue…" />
-        <div className="toolbar-right">
-          <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button>
-        </div>
+        <div className="toolbar-right"><button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button></div>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>
-        {filtered.length} product{filtered.length !== 1 ? 's' : ''}{search && ` matching "${search}"`}
-      </div>
+      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>{filtered.length} product{filtered.length !== 1 ? 's' : ''}{search && ` matching "${search}"`}</div>
+
       <div className="card" style={{ overflow: 'auto' }}>
         <table className="admin-table">
           <thead>
@@ -106,7 +195,7 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
               <th style={{ width: 110 }}>Part no.</th>
               <th style={{ width: 100, textAlign: 'right' }}>Factory cost</th>
               <th style={{ width: 160 }}>Notes</th>
-              <th style={{ width: 130, textAlign: 'right' }}>Actions</th>
+              <th style={{ width: 160, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -123,33 +212,65 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
                 </tr>
               </>
             )}
-            {filtered.map((p) => editingId === p.id ? (
-              <>
-                <EditRow key={`e-${p.id}`} buf={editBuf} onBuf={setEditBuf} />
-                <tr key={`ea-${p.id}`} style={{ background: 'var(--brand-light)' }}>
-                  <td colSpan={6} style={{ paddingTop: 6, paddingBottom: 6 }}>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button className="btn btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
-                      <button className="btn btn-sm btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-                    </div>
-                  </td>
-                </tr>
-              </>
-            ) : (
-              <tr key={p.id}>
-                <td>{p.description}</td>
-                <td><span style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{p.category}</span></td>
-                <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
-                <td style={{ textAlign: 'right', fontWeight: 500 }}>{p.factory_cost != null ? `£${p.factory_cost.toFixed(2)}` : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>—</span>}</td>
-                <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{p.notes || '—'}</td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
-                    <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+
+            {filtered.map((p) => {
+              const variantCount = variantCountByProduct[p.id] ?? 0
+              const isEditingThis = editingId === p.id
+              const showingVariants = showVariantsFor === p.id
+
+              return (
+                <>
+                  {isEditingThis ? (
+                    <>
+                      <EditRow key={`e-${p.id}`} buf={editBuf} onBuf={setEditBuf} />
+                      <tr key={`ea-${p.id}`} style={{ background: 'var(--brand-light)' }}>
+                        <td colSpan={6} style={{ paddingTop: 6, paddingBottom: 6 }}>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button className="btn btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
+                            <button className="btn btn-sm btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </>
+                  ) : (
+                    <tr key={p.id}>
+                      <td>{p.description}</td>
+                      <td><span style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{p.category}</span></td>
+                      <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 500 }}>{p.factory_cost != null ? `£${p.factory_cost.toFixed(2)}` : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>—</span>}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{p.notes || '—'}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-sm"
+                            style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}}
+                            onClick={() => setShowVariantsFor(showingVariants ? null : p.id)}
+                          >
+                            Variants{variantCount > 0 ? ` (${variantCount})` : ''}
+                          </button>
+                          <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
+                          <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {/* Variants row */}
+                  {showingVariants && !isEditingThis && (
+                    <tr key={`v-${p.id}`} style={{ background: 'var(--surface-2)' }}>
+                      <td colSpan={6} style={{ padding: '4px 12px 12px' }}>
+                        <VariantManager
+                          product={p}
+                          variants={variants}
+                          onRefresh={onRefreshVariants}
+                          showToast={showToast}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -176,16 +297,13 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
     if (!newName.trim()) { showToast('Preset name is required', 'error'); return }
     setSaving(true)
     const { data, error } = await supabase.from('presets').insert({
-      name: newName.trim(),
-      description: newDesc.trim() || null,
+      name: newName.trim(), description: newDesc.trim() || null,
       default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null,
       default_labour_rate_per_min: null,
     }).select().single()
     setSaving(false)
     if (error || !data) { showToast('Failed to create preset', 'error'); return }
-    showToast('Preset created')
-    setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins('')
-    setExpanded(data.id); onRefresh()
+    showToast('Preset created'); setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins(''); setExpanded(data.id); onRefresh()
   }
 
   const deletePreset = async (id: string) => {
@@ -196,17 +314,14 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   }
 
   const startEditPreset = (preset: Preset) => {
-    setEditingPresetId(preset.id)
-    setEditName(preset.name)
-    setEditDesc(preset.description ?? '')
+    setEditingPresetId(preset.id); setEditName(preset.name); setEditDesc(preset.description ?? '')
     setEditLabourMins(preset.default_labour_minutes != null ? String(preset.default_labour_minutes) : '')
   }
 
   const savePresetMeta = async (id: string) => {
     if (!editName.trim()) { showToast('Name is required', 'error'); return }
     const { error } = await supabase.from('presets').update({
-      name: editName.trim(),
-      description: editDesc.trim() || null,
+      name: editName.trim(), description: editDesc.trim() || null,
       default_labour_minutes: editLabourMins ? parseFloat(editLabourMins) : null,
     }).eq('id', id)
     if (error) { showToast('Failed to update preset', 'error'); return }
@@ -216,33 +331,24 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   const addItem = async (presetId: string) => {
     if (!addItemProductId) { showToast('Select a product', 'error'); return }
     const qty = parseInt(addItemQty) || 1
-    const { error } = await supabase.from('preset_items').upsert(
-      { preset_id: presetId, product_id: addItemProductId, quantity: qty },
-      { onConflict: 'preset_id,product_id' },
-    )
+    const { error } = await supabase.from('preset_items').upsert({ preset_id: presetId, product_id: addItemProductId, quantity: qty }, { onConflict: 'preset_id,product_id' })
     if (error) { showToast('Failed to add item', 'error'); return }
     showToast('Item added'); setAddItemProductId(''); setAddItemQty('1'); onRefresh()
   }
 
-  const removeItem = async (itemId: string) => {
-    await supabase.from('preset_items').delete().eq('id', itemId); onRefresh()
-  }
-
+  const removeItem = async (itemId: string) => { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh() }
   const updateItemQty = async (itemId: string, qty: number) => {
     if (qty <= 0) { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh(); return }
     await supabase.from('preset_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
   }
 
-  const usedProductIds = (presetId: string) =>
-    new Set((presets.find((p) => p.id === presetId)?.preset_items ?? []).map((i) => i.product_id))
+  const usedProductIds = (presetId: string) => new Set((presets.find((p) => p.id === presetId)?.preset_items ?? []).map((i) => i.product_id))
 
   return (
     <>
       <div className="toolbar">
         <div style={{ fontSize: 13, color: 'var(--text-2)' }}>{presets.length} preset{presets.length !== 1 ? 's' : ''}</div>
-        <div className="toolbar-right">
-          <button className="btn btn-primary" onClick={() => setCreatingNew(true)}>+ New preset</button>
-        </div>
+        <div className="toolbar-right"><button className="btn btn-primary" onClick={() => setCreatingNew(true)}>+ New preset</button></div>
       </div>
 
       {creatingNew && (
@@ -253,9 +359,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
             <input className="input" placeholder="Description (optional)" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} style={{ flex: 2, minWidth: 160 }} />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
-              Default labour duration (minutes) — optional
-            </label>
+            <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Default labour duration (minutes) — optional</label>
             <input className="input" style={{ maxWidth: 220 }} type="number" min="0" placeholder="e.g. 120" value={newLabourMins} onChange={(e) => setNewLabourMins(e.target.value)} />
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -266,11 +370,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
       )}
 
       {presets.length === 0 && !creatingNew && (
-        <div className="empty-state">
-          <div className="empty-state-icon">⚡</div>
-          <h3>No presets yet</h3>
-          <p>Create a preset to let sales reps quickly populate the BOM with common configurations</p>
-        </div>
+        <div className="empty-state"><div className="empty-state-icon">⚡</div><h3>No presets yet</h3><p>Create a preset to let sales reps quickly populate the BOM</p></div>
       )}
 
       {presets.map((preset) => {
@@ -291,9 +391,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                       <input className="input input-sm" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={{ flex: 2, minWidth: 140 }} placeholder="Description" />
                     </div>
                     <div style={{ marginBottom: 8 }}>
-                      <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                        Default labour minutes
-                      </label>
+                      <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Default labour minutes</label>
                       <input className="input input-sm" type="number" min="0" value={editLabourMins} onChange={(e) => setEditLabourMins(e.target.value)} placeholder="Optional" style={{ maxWidth: 160 }} />
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -309,9 +407,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                     </div>
                     {preset.description && <div className="preset-admin-desc">{preset.description}</div>}
                     {preset.default_labour_minutes != null && (
-                      <div style={{ fontSize: 12, color: 'var(--brand)', marginTop: 3 }}>
-                        Labour default: {preset.default_labour_minutes} minutes
-                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--brand)', marginTop: 3 }}>Labour default: {preset.default_labour_minutes} minutes</div>
                     )}
                   </>
                 )}
@@ -321,9 +417,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   <button className="btn btn-sm" onClick={() => { startEditPreset(preset); setExpanded(preset.id) }}>Edit</button>
                   <button className="btn btn-sm btn-danger" onClick={() => deletePreset(preset.id)}>Delete</button>
                   <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none', flexShrink: 0 }}
-                    viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M4 6l4 4 4-4" />
-                  </svg>
+                    viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
                 </div>
               )}
             </div>
@@ -339,34 +433,19 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <input
-                          type="number" min="1"
-                          style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
-                          value={item.quantity}
-                          onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)}
-                        />
+                        <input type="number" min="1" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
+                          value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
                         <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Remove</button>
                       </div>
                     </div>
                   )
                 })}
-
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12 }}>
                   <div style={{ flex: 2, minWidth: 200 }}>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
-                      Add product
-                    </label>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Add product</label>
                     <select className="input input-sm" value={addItemProductId} onChange={(e) => setAddItemProductId(e.target.value)}>
                       <option value="">Select a product…</option>
-                      {CATEGORIES.map((cat) => {
-                        const cp = availableProducts.filter((p) => p.category === cat)
-                        if (!cp.length) return null
-                        return (
-                          <optgroup key={cat} label={cat}>
-                            {cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}
-                          </optgroup>
-                        )
-                      })}
+                      {CATEGORIES.map((cat) => { const cp = availableProducts.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
                     </select>
                   </div>
                   <div style={{ width: 80 }}>
@@ -392,9 +471,7 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
 
   const saveSetting = async (key: string, value: string, min: number, max: number | null, label: string) => {
     const val = parseFloat(value)
-    if (isNaN(val) || val < min || (max !== null && val > max)) {
-      showToast(`Enter a valid ${label}`, 'error'); return false
-    }
+    if (isNaN(val) || val < min || (max !== null && val > max)) { showToast(`Enter a valid ${label}`, 'error'); return false }
     setSaving(true)
     const { error } = await supabase.from('settings').update({ value: String(val) }).eq('key', key)
     setSaving(false)
@@ -402,38 +479,19 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
     return true
   }
 
-  const saveUplift = async () => {
-    const ok = await saveSetting('hardware_uplift_pct', upliftPct, 0, 100, 'percentage between 0 and 100')
-    if (ok) { showToast('Hardware uplift saved'); onRefresh() }
-  }
-
-  const saveLabour = async () => {
-    const ok = await saveSetting('labour_rate_per_min', labourRate, 0, null, 'labour rate')
-    if (ok) { showToast('Labour rate saved'); onRefresh() }
-  }
+  const saveUplift = async () => { if (await saveSetting('hardware_uplift_pct', upliftPct, 0, 100, 'percentage between 0 and 100')) { showToast('Hardware uplift saved'); onRefresh() } }
+  const saveLabour = async () => { if (await saveSetting('labour_rate_per_min', labourRate, 0, null, 'labour rate')) { showToast('Labour rate saved'); onRefresh() } }
 
   return (
     <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-      {/* Hardware uplift */}
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Hardware uplift</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
-          A percentage added to the materials subtotal on every quote. Shown as a separate line item on quotes and PDFs.
-        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>A percentage added to the materials subtotal on every quote. Shown as a separate line item on quotes and PDFs.</p>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Uplift percentage (%)
-            </label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Uplift percentage (%)</label>
             <div style={{ position: 'relative' }}>
-              <input
-                className="input"
-                type="number" min="0" max="100" step="0.1"
-                value={upliftPct}
-                onChange={(e) => setUpliftPct(e.target.value)}
-                style={{ paddingRight: 36, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }}
-              />
+              <input className="input" type="number" min="0" max="100" step="0.1" value={upliftPct} onChange={(e) => setUpliftPct(e.target.value)} style={{ paddingRight: 36, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }} />
               <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: 'var(--text-3)', pointerEvents: 'none' }}>%</span>
             </div>
           </div>
@@ -446,26 +504,15 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
         )}
       </div>
 
-      {/* Labour rate */}
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Labour rate</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
-          Cost per minute of labour. Sales reps enter the duration in minutes — this rate is applied automatically. Not visible to sales reps.
-        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>Cost per minute of labour. Sales reps enter the duration in minutes — this rate is applied automatically. Not visible to sales reps.</p>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Rate (£ per minute)
-            </label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rate (£ per minute)</label>
             <div style={{ position: 'relative' }}>
               <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: 'var(--text-3)', pointerEvents: 'none' }}>£</span>
-              <input
-                className="input"
-                type="number" min="0" step="0.0001"
-                value={labourRate}
-                onChange={(e) => setLabourRate(e.target.value)}
-                style={{ paddingLeft: 28, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }}
-              />
+              <input className="input" type="number" min="0" step="0.0001" value={labourRate} onChange={(e) => setLabourRate(e.target.value)} style={{ paddingLeft: 28, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }} />
             </div>
           </div>
           <button className="btn btn-primary" onClick={saveLabour} disabled={saving} style={{ flexShrink: 0 }}>Save</button>
@@ -476,35 +523,26 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
           </div>
         )}
       </div>
-
     </div>
   )
 }
 
 // ── Main AdminPanel ───────────────────────────────────────────
-export default function AdminPanel({ products, presets, settings, onRefreshProducts, onRefreshPresets, onRefreshSettings, showToast }: Props) {
+export default function AdminPanel({ products, presets, settings, variants, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, showToast }: Props) {
   const [tab, setTab] = useState<AdminTab>('products')
 
   return (
     <>
       <div className="admin-tabs">
-        <button className={`admin-tab ${tab === 'products' ? 'active' : ''}`} onClick={() => setTab('products')}>
-          Product catalogue
-        </button>
+        <button className={`admin-tab ${tab === 'products' ? 'active' : ''}`} onClick={() => setTab('products')}>Product catalogue</button>
         <button className={`admin-tab ${tab === 'presets' ? 'active' : ''}`} onClick={() => setTab('presets')}>
           Presets
-          {presets.length > 0 && (
-            <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>
-              {presets.length}
-            </span>
-          )}
+          {presets.length > 0 && <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>{presets.length}</span>}
         </button>
-        <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>
-          Settings
-        </button>
+        <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
 
-      {tab === 'products' && <ProductsTab products={products} onRefresh={onRefreshProducts} showToast={showToast} />}
+      {tab === 'products' && <ProductsTab products={products} variants={variants} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} showToast={showToast} />}
       {tab === 'presets' && <PresetsTab products={products} presets={presets} onRefresh={onRefreshPresets} showToast={showToast} />}
       {tab === 'settings' && <SettingsTab settings={settings} onRefresh={onRefreshSettings} showToast={showToast} />}
     </>

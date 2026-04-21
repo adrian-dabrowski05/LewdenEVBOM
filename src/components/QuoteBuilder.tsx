@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { Product, QuantityMap, QuoteFormData, Preset, AppSettings } from '../types'
+import type { Product, ProductVariant, QuantityMap, VariantSelectionMap, QuoteFormData, Preset, AppSettings } from '../types'
 import { CATEGORIES } from '../types'
 import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
@@ -7,8 +7,11 @@ import { printQuote } from '../utils/printQuote'
 interface Props {
   products: Product[]
   loading: boolean
+  variants: ProductVariant[]
   quantities: QuantityMap
   setQty: (id: string, qty: number) => void
+  variantSelections: VariantSelectionMap
+  setVariantSelection: (productId: string, variantId: string) => void
   quoteForm: QuoteFormData
   setQuoteForm: (f: QuoteFormData) => void
   onSave: (f: QuoteFormData) => Promise<boolean>
@@ -84,9 +87,7 @@ function PresetsBar({ presets, products, onApply }: { presets: Preset[]; product
                 </div>
               )}
             </div>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
-              Quantities will be added to your current BOM. You can adjust them afterwards.
-            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>Quantities will be added to your current BOM. You can adjust them afterwards.</p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setPreviewPreset(null)}>Cancel</button>
               <button className="btn btn-secondary" onClick={() => { onApply(previewPreset); setPreviewPreset(null) }}>Apply preset</button>
@@ -98,16 +99,31 @@ function PresetsBar({ presets, products, onApply }: { presets: Preset[]; product
   )
 }
 
-export default function QuoteBuilder({ products, loading, quantities, setQty, quoteForm, setQuoteForm, onSave, showToast, presets, onApplyPreset, settings }: Props) {
+export default function QuoteBuilder({
+  products, loading, variants, quantities, setQty,
+  variantSelections, setVariantSelection,
+  quoteForm, setQuoteForm, onSave, showToast,
+  presets, onApplyPreset, settings,
+}: Props) {
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
-  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', notes: '', labour_minutes: '' })
+  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '' })
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => { const next = new Set(prev); next.has(cat) ? next.delete(cat) : next.add(cat); return next })
   }
+
+  // Variants indexed by product id
+  const variantsByProduct = useMemo(() => {
+    const map: Record<string, ProductVariant[]> = {}
+    variants.forEach((v) => {
+      if (!map[v.product_id]) map[v.product_id] = []
+      map[v.product_id].push(v)
+    })
+    return map
+  }, [variants])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return products
@@ -129,6 +145,12 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
   const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
   const activeCount = activeItems.length
   const searchActive = search.trim().length > 0
+
+  // Check if any active items with variants are missing a variant selection
+  const missingVariants = activeItems.filter((p) => {
+    const pvs = variantsByProduct[p.id]
+    return pvs && pvs.length > 0 && !variantSelections[p.id]
+  })
 
   // ── Totals ─────────────────────────────────────────────────
   const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (quantities[p.id] ?? 0) : 0), 0)
@@ -155,21 +177,30 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
     setSaving(true)
     const ok = await onSave(saveForm)
     setSaving(false)
-    if (ok) { setShowSaveModal(false); setSaveForm({ project_name: '', customer_name: '', notes: '', labour_minutes: '' }) }
+    if (ok) { setShowSaveModal(false); setSaveForm({ project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '' }) }
   }
 
   const handlePdf = () => {
     if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
     printQuote({
-      form: quoteForm,
-      items: activeItems.map((p) => ({
-        description: p.description,
-        part_number: p.part_number,
-        factory_cost: p.factory_cost,
-        quantity: quantities[p.id],
-        line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
-      })),
-      products,
+      form: {
+        project_name: quoteForm.project_name,
+        customer_name: quoteForm.customer_name,
+        mo_number: quoteForm.mo_number,
+        notes: quoteForm.notes,
+      },
+      items: activeItems.map((p) => {
+        const selectedVariantId = variantSelections[p.id]
+        const selectedVariant = selectedVariantId ? variants.find((v) => v.id === selectedVariantId) : null
+        return {
+          description: p.description,
+          part_number: p.part_number,
+          factory_cost: p.factory_cost,
+          quantity: quantities[p.id],
+          line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
+          variant_label: selectedVariant?.label ?? null,
+        }
+      }),
       materialsSubtotal,
       hardwareUpliftPct: upliftPct,
       hardwareUpliftAmount,
@@ -181,41 +212,61 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
     })
   }
 
+  // ── Render product row with optional variant dropdown ──────
+  const renderVariantDropdown = (p: Product, isMobile = false) => {
+    const pvs = variantsByProduct[p.id]
+    const qty = quantities[p.id] ?? 0
+    if (!pvs || pvs.length === 0 || qty === 0) return null
+    const selected = variantSelections[p.id] ?? ''
+    const missing = !selected
+
+    return (
+      <div style={{ marginTop: isMobile ? 8 : 6 }}>
+        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: missing ? 'var(--danger)' : 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          {missing ? '⚠ Select variant' : 'Variant'}
+        </label>
+        <select
+          className="input input-sm"
+          style={{ borderColor: missing ? 'var(--danger)' : 'var(--brand)', maxWidth: isMobile ? '100%' : 280 }}
+          value={selected}
+          onChange={(e) => setVariantSelection(p.id, e.target.value)}
+        >
+          <option value="">Select an option…</option>
+          {pvs.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+        </select>
+      </div>
+    )
+  }
+
   if (loading) return <div className="loading"><div className="spinner" /> Loading catalogue…</div>
 
   return (
     <>
-      {/* Presets */}
       <PresetsBar presets={presets} products={products} onApply={onApplyPreset} />
 
       {/* Quote info */}
       <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>
-          Quote details
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>Quote details</div>
         <div className="quote-info-grid">
           <input className="input" placeholder="Project name *" value={quoteForm.project_name} onChange={(e) => setQuoteForm({ ...quoteForm, project_name: e.target.value })} />
           <input className="input" placeholder="Customer name" value={quoteForm.customer_name} onChange={(e) => setQuoteForm({ ...quoteForm, customer_name: e.target.value })} />
+          <input
+            className="input"
+            placeholder="MO number"
+            value={quoteForm.mo_number}
+            onChange={(e) => setQuoteForm({ ...quoteForm, mo_number: e.target.value })}
+            style={{ fontFamily: 'var(--mono)' }}
+          />
         </div>
         <input className="input" placeholder="Notes (optional)" value={quoteForm.notes} onChange={(e) => setQuoteForm({ ...quoteForm, notes: e.target.value })} style={{ marginTop: 10 }} />
 
-        {/* Labour — duration only, rate is admin-controlled */}
+        {/* Labour */}
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>
-            Labour
-          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>Labour</div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 160 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>
-                Duration (minutes)
-              </label>
-              <input
-                className="input"
-                type="number" min="0" step="1"
-                placeholder="0"
-                value={quoteForm.labour_minutes}
-                onChange={(e) => setQuoteForm({ ...quoteForm, labour_minutes: e.target.value })}
-              />
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Duration (minutes)</label>
+              <input className="input" type="number" min="0" step="1" placeholder="0" value={quoteForm.labour_minutes} onChange={(e) => setQuoteForm({ ...quoteForm, labour_minutes: e.target.value })} />
             </div>
             {labourRate > 0 && (
               <div style={{ paddingBottom: 1 }}>
@@ -237,10 +288,17 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         </div>
       </div>
 
-      {/* Search — below quote details */}
+      {/* Search */}
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" />
       </div>
+
+      {/* Missing variants warning */}
+      {missingVariants.length > 0 && (
+        <div style={{ padding: '10px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 13, color: 'var(--danger)', fontWeight: 500 }}>
+          {missingVariants.length} item{missingVariants.length !== 1 ? 's' : ''} need a variant selection before saving
+        </div>
+      )}
 
       {searchActive && filtered.length === 0 && (
         <div className="empty-state">
@@ -250,7 +308,6 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         </div>
       )}
 
-      {/* Product sections */}
       {CATEGORIES.map((cat) => {
         const items = byCategory[cat] ?? []
         if (items.length === 0) return null
@@ -262,16 +319,10 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
             <div className="category-header" onClick={() => !searchActive && toggleCategory(cat)}>
               <span className="category-label">{cat}</span>
               <span className="category-count">
-                {catQty > 0 && (
-                  <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 8px', fontSize: 10, fontWeight: 700 }}>
-                    {catQty} selected
-                  </span>
-                )}
+                {catQty > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 8px', fontSize: 10, fontWeight: 700 }}>{catQty} selected</span>}
                 {items.length} items
                 {!searchActive && (
-                  <svg className={`category-chevron ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M4 6l4 4 4-4" />
-                  </svg>
+                  <svg className={`category-chevron ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
                 )}
               </span>
             </div>
@@ -294,19 +345,17 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
                       {items.map((p) => {
                         const qty = quantities[p.id] ?? 0
                         const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
+                        const variantDropdown = renderVariantDropdown(p)
                         return (
                           <tr key={p.id}>
                             <td>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
+                              {variantDropdown}
                             </td>
                             <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
-                            <td className="right">
-                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                <Stepper value={qty} onChange={(n) => setQty(p.id, n)} />
-                              </div>
-                            </td>
+                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div></td>
                             <td className="right" style={{ fontWeight: qty > 0 ? 600 : 400 }}>
                               {lineTotal != null ? fmt(lineTotal) : qty > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}
                             </td>
@@ -331,16 +380,13 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
                           </div>
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div>
                         </div>
+                        {renderVariantDropdown(p, true)}
                         <div className="product-card-meta">
                           <span className="product-card-cost">
                             {p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}
                             <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginLeft: 4 }}>each</span>
                           </span>
-                          {qty > 0 && (
-                            <span className="product-card-total">
-                              Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}
-                            </span>
-                          )}
+                          {qty > 0 && <span className="product-card-total">Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}</span>}
                         </div>
                       </div>
                     )
@@ -352,12 +398,10 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         )
       })}
 
-      {/* Cost breakdown summary */}
+      {/* Cost breakdown */}
       {activeCount > 0 && (
         <div className="card" style={{ marginTop: 16, padding: '14px 16px' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>
-            Cost breakdown
-          </div>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>Cost breakdown</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
               <span style={{ color: 'var(--text-2)' }}>Materials subtotal</span>
@@ -375,8 +419,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
             {labourTotal > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                 <span style={{ color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Labour
-                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min @ £{labourRate.toFixed(4)}/min)</span>
+                  Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min @ £{labourRate.toFixed(4)}/min)</span>
                 </span>
                 <span style={{ fontWeight: 500, color: 'var(--brand)' }}>£{labourTotal.toFixed(2)}</span>
               </div>
@@ -394,28 +437,14 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         <div>
           <div className="total-bar-label">Grand total</div>
           <div className="total-bar-amount">{`£${grandTotal.toFixed(2)}`}</div>
-          {activeCount > 0 && (
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
-              {activeCount} line item{activeCount !== 1 ? 's' : ''}
-            </div>
-          )}
+          {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
         </div>
         <div className="total-bar-actions">
-          {activeCount > 0 && (
-            <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>
-              Clear
-            </button>
-          )}
-          <button
-            className="btn"
-            style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}
-            onClick={handlePdf}
-          >
+          {activeCount > 0 && <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
+          <button className="btn" style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }} onClick={handlePdf}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="12" y1="18" x2="12" y2="12" />
-              <line x1="9" y1="15" x2="15" y2="15" />
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+              <line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" />
             </svg>
             PDF
           </button>
@@ -429,19 +458,23 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="modal-handle" />
             <h2 style={{ marginBottom: 4 }}>Save quote</h2>
-            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 ? 10 : 20 }}>
               {activeCount} item{activeCount !== 1 ? 's' : ''} · £{grandTotal.toFixed(2)} total
             </p>
+            {missingVariants.length > 0 && (
+              <div style={{ padding: '8px 12px', background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--warning)', marginBottom: 16 }}>
+                Note: {missingVariants.length} item{missingVariants.length !== 1 ? 's' : ''} still need a variant selected. The quote will save but variant selection will be missing.
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
               <input className="input" placeholder="Project name *" value={saveForm.project_name} onChange={(e) => setSaveForm({ ...saveForm, project_name: e.target.value })} autoFocus />
               <input className="input" placeholder="Customer name" value={saveForm.customer_name} onChange={(e) => setSaveForm({ ...saveForm, customer_name: e.target.value })} />
+              <input className="input" placeholder="MO number" value={saveForm.mo_number} onChange={(e) => setSaveForm({ ...saveForm, mo_number: e.target.value })} style={{ fontFamily: 'var(--mono)' }} />
               <input className="input" placeholder="Notes (optional)" value={saveForm.notes} onChange={(e) => setSaveForm({ ...saveForm, notes: e.target.value })} />
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setShowSaveModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save quote'}
-              </button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save quote'}</button>
             </div>
           </div>
         </div>

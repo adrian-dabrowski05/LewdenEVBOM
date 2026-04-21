@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
-import type { Product, Quote, Preset, View, QuantityMap, QuoteFormData, AppSettings } from './types'
+import type { Product, ProductVariant, Quote, Preset, View, QuantityMap, VariantSelectionMap, QuoteFormData, AppSettings } from './types'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -12,7 +12,7 @@ import Toast from './components/Toast'
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
-  project_name: '', customer_name: '', notes: '', labour_minutes: '',
+  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '',
 }
 
 export default function App() {
@@ -22,12 +22,14 @@ export default function App() {
 
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
+  const [variants, setVariants] = useState<ProductVariant[]>([])
   const [presets, setPresets] = useState<Preset[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
   const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0 })
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
+  const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
 
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -45,6 +47,13 @@ export default function App() {
     if (error) showToast('Failed to load products', 'error')
     else setProducts(data || [])
     setProductsLoading(false)
+  }
+
+  // ── Load variants ──────────────────────────────────────────
+  useEffect(() => { loadVariants() }, [])
+  const loadVariants = async () => {
+    const { data } = await supabase.from('product_variants').select('*').order('sort_order')
+    if (data) setVariants(data)
   }
 
   // ── Load presets ───────────────────────────────────────────
@@ -79,10 +88,7 @@ export default function App() {
       return next
     })
     if (preset.default_labour_minutes != null) {
-      setQuoteForm((prev) => ({
-        ...prev,
-        labour_minutes: String(preset.default_labour_minutes),
-      }))
+      setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
   }, [showToast])
@@ -114,6 +120,7 @@ export default function App() {
     const { data: quoteData, error: quoteError } = await supabase.from('quotes').insert({
       project_name: formData.project_name.trim(),
       customer_name: formData.customer_name.trim() || null,
+      mo_number: formData.mo_number.trim() || null,
       notes: formData.notes.trim() || null,
       grand_total: grandTotal,
       materials_subtotal: materialsSubtotal,
@@ -127,21 +134,28 @@ export default function App() {
 
     if (quoteError || !quoteData) { showToast('Failed to save quote', 'error'); return false }
 
-    const itemsToInsert = activeItems.map((p) => ({
-      quote_id: quoteData.id,
-      product_id: p.id,
-      description: p.description,
-      part_number: p.part_number,
-      factory_cost: p.factory_cost,
-      quantity: quantities[p.id],
-      line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
-    }))
+    const itemsToInsert = activeItems.map((p) => {
+      const selectedVariantId = variantSelections[p.id] ?? null
+      const selectedVariant = selectedVariantId ? variants.find((v) => v.id === selectedVariantId) : null
+      return {
+        quote_id: quoteData.id,
+        product_id: p.id,
+        description: p.description,
+        part_number: p.part_number,
+        factory_cost: p.factory_cost,
+        quantity: quantities[p.id],
+        line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
+        variant_id: selectedVariantId,
+        variant_label: selectedVariant?.label ?? null,
+      }
+    })
 
     const { error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert)
     if (itemsError) { showToast('Quote saved but items failed to save', 'error'); return false }
 
     showToast('Quote saved successfully')
     setQuantities({})
+    setVariantSelections({})
     setQuoteForm(DEFAULT_FORM)
     return true
   }
@@ -176,9 +190,19 @@ export default function App() {
   // ── Qty helpers ────────────────────────────────────────────
   const setQty = useCallback((productId: string, qty: number) => {
     setQuantities((prev) => {
-      if (qty <= 0) { const next = { ...prev }; delete next[productId]; return next }
+      if (qty <= 0) {
+        const next = { ...prev }
+        delete next[productId]
+        // Clear variant selection if qty removed
+        setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
+        return next
+      }
       return { ...prev, [productId]: qty }
     })
+  }, [])
+
+  const setVariantSelection = useCallback((productId: string, variantId: string) => {
+    setVariantSelections((prev) => ({ ...prev, [productId]: variantId }))
   }, [])
 
   const activeCount = Object.values(quantities).filter((q) => q > 0).length
@@ -191,7 +215,9 @@ export default function App() {
         {view === 'builder' && (
           <QuoteBuilder
             products={products} loading={productsLoading}
+            variants={variants}
             quantities={quantities} setQty={setQty}
+            variantSelections={variantSelections} setVariantSelection={setVariantSelection}
             quoteForm={quoteForm} setQuoteForm={setQuoteForm}
             onSave={saveQuote} showToast={showToast}
             presets={presets} onApplyPreset={applyPreset}
@@ -203,8 +229,9 @@ export default function App() {
         )}
         {view === 'admin' && isAdmin && (
           <AdminPanel
-            products={products} presets={presets} settings={settings}
-            onRefreshProducts={loadProducts} onRefreshPresets={loadPresets} onRefreshSettings={loadSettings}
+            products={products} presets={presets} settings={settings} variants={variants}
+            onRefreshProducts={loadProducts} onRefreshPresets={loadPresets}
+            onRefreshSettings={loadSettings} onRefreshVariants={loadVariants}
             showToast={showToast}
           />
         )}

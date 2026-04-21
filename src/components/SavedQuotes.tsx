@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { Quote, QuoteStatus } from '../types'
 import SearchBar from './SearchBar'
+import { printSavedQuote, printBOM } from '../utils/printQuote'
 
 interface Props {
   quotes: Quote[]
@@ -22,10 +23,77 @@ const STATUS_SELECT_STYLES: Record<QuoteStatus, React.CSSProperties> = {
 const fmt = (n: number | null | undefined) => n != null ? `£${Number(n).toFixed(2)}` : '—'
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 
+function BOMModal({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+  const items = quote.quote_items ?? []
+  const baseUrl = (import.meta as any).env.BASE_URL
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580, maxHeight: '90dvh', overflow: 'auto' }}>
+        <div className="modal-handle" />
+
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 17 }}>Bill of Materials</h2>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 3 }}>{quote.project_name}</p>
+            {quote.customer_name && <p style={{ fontSize: 13, color: 'var(--text-2)' }}>{quote.customer_name}</p>}
+          </div>
+          {quote.mo_number && (
+            <span style={{ background: 'var(--brand)', color: '#fff', padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {quote.mo_number}
+            </span>
+          )}
+        </div>
+
+        <div style={{ background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--brand)', fontWeight: 500 }}>
+          Order confirmation — no pricing information shown
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {items.map((item, i) => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{item.description}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {item.part_number && <span className="part-number">{item.part_number}</span>}
+                  {item.variant_label && (
+                    <span style={{ fontSize: 11, fontWeight: 600, background: 'var(--secondary)', color: 'var(--secondary-text)', padding: '2px 8px', borderRadius: 99 }}>
+                      {item.variant_label}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>×{item.quantity}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ borderTop: '1.5px solid var(--border)', marginTop: 12, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{items.length} item{items.length !== 1 ? 's' : ''} · {items.reduce((s, i) => s + i.quantity, 0)} units total</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm" onClick={onClose}>Close</button>
+            <button className="btn btn-sm btn-primary" onClick={() => printBOM(quote, baseUrl)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                <line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" />
+              </svg>
+              Print BOM
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete, isAdmin }: Props) {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [bomQuote, setBomQuote] = useState<Quote | null>(null)
+  const baseUrl = (import.meta as any).env.BASE_URL
 
   const filtered = useMemo(() => {
     if (!search.trim()) return quotes
@@ -33,9 +101,14 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
     return quotes.filter((quote) =>
       quote.project_name.toLowerCase().includes(q) ||
       (quote.customer_name ?? '').toLowerCase().includes(q) ||
+      (quote.mo_number ?? '').toLowerCase().includes(q) ||
       (quote.notes ?? '').toLowerCase().includes(q) ||
       quote.status.toLowerCase().includes(q) ||
-      quote.quote_items?.some((item) => item.description.toLowerCase().includes(q) || (item.part_number ?? '').toLowerCase().includes(q)),
+      quote.quote_items?.some((item) =>
+        item.description.toLowerCase().includes(q) ||
+        (item.part_number ?? '').toLowerCase().includes(q) ||
+        (item.variant_label ?? '').toLowerCase().includes(q),
+      ),
     )
   }, [quotes, search])
 
@@ -54,7 +127,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
   return (
     <>
       <div className="toolbar">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search by project, customer, part number…" />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search by project, customer, MO number, part number…" />
         <div style={{ fontSize: 13, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{filtered.length} of {quotes.length}</div>
       </div>
 
@@ -81,6 +154,11 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <div className="quote-card-title">{q.project_name}</div>
                     <span className={`badge ${STATUS_COLORS[q.status]}`}>{STATUS_LABELS[q.status]}</span>
+                    {q.mo_number && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, background: 'var(--brand)', color: '#fff', padding: '1px 7px', borderRadius: 4 }}>
+                        {q.mo_number}
+                      </span>
+                    )}
                   </div>
                   {q.customer_name && <div className="quote-card-meta">{q.customer_name}</div>}
                   <div className="quote-card-meta">{items.length} item{items.length !== 1 ? 's' : ''} · {formatDate(q.created_at)}</div>
@@ -102,7 +180,20 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                     <select className="status-select" style={STATUS_SELECT_STYLES[q.status]} value={q.status} onChange={(e) => onUpdateStatus(q.id, e.target.value)}>
                       {Object.entries(STATUS_LABELS).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
                     </select>
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="btn btn-sm" onClick={() => setBomQuote(q)}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                        </svg>
+                        View BOM
+                      </button>
+                      <button className="btn btn-sm" onClick={() => printSavedQuote(q, baseUrl)}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                          <line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" />
+                        </svg>
+                        PDF
+                      </button>
                       {isAdmin && !isConfirming && <button className="btn btn-sm btn-danger" onClick={() => setConfirmDelete(q.id)}>Delete</button>}
                       {isConfirming && (
                         <>
@@ -121,6 +212,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                         <tr>
                           <th>Description</th>
                           <th style={{ width: 100 }}>Part no.</th>
+                          <th style={{ width: 120 }}>Variant</th>
                           <th className="right" style={{ width: 80 }}>Unit cost</th>
                           <th className="right" style={{ width: 50 }}>Qty</th>
                           <th className="right" style={{ width: 80 }}>Total</th>
@@ -131,6 +223,11 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                           <tr key={item.id}>
                             <td>{item.description}</td>
                             <td>{item.part_number ? <span className="part-number">{item.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
+                            <td>
+                              {item.variant_label
+                                ? <span style={{ fontSize: 11, fontWeight: 600, background: 'var(--secondary)', color: 'var(--secondary-text)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{item.variant_label}</span>
+                                : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}
+                            </td>
                             <td className="right">{item.factory_cost != null ? fmt(item.factory_cost) : <span className="cost-tbc">TBC</span>}</td>
                             <td className="right">{item.quantity}</td>
                             <td className="right" style={{ fontWeight: 600 }}>{item.line_total != null ? fmt(item.line_total) : <span className="cost-tbc">TBC</span>}</td>
@@ -177,6 +274,8 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
           )
         })}
       </div>
+
+      {bomQuote && <BOMModal quote={bomQuote} onClose={() => setBomQuote(null)} />}
     </>
   )
 }
