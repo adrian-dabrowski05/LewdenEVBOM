@@ -34,19 +34,27 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     return products.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
   }, [products, search])
 
-  const startEdit = (p: Product) => { setEditingId(p.id); setEditBuf({ description: p.description, category: p.category, part_number: p.part_number ?? '', factory_cost: p.factory_cost != null ? String(p.factory_cost) : '', notes: p.notes ?? '' }) }
+  const startEdit = (p: Product) => {
+    setEditingId(p.id)
+    setEditBuf({ description: p.description, category: p.category, part_number: p.part_number ?? '', factory_cost: p.factory_cost != null ? String(p.factory_cost) : '', notes: p.notes ?? '' })
+  }
 
   const saveEdit = async () => {
     if (!editingId || !editBuf.description.trim()) { showToast('Description is required', 'error'); return }
     setSaving(true)
-    const { error } = await supabase.from('products').update({ description: editBuf.description.trim(), category: editBuf.category, part_number: editBuf.part_number.trim() || null, factory_cost: editBuf.factory_cost ? parseFloat(editBuf.factory_cost) : null, notes: editBuf.notes.trim() || null }).eq('id', editingId)
+    const { error } = await supabase.from('products').update({
+      description: editBuf.description.trim(), category: editBuf.category,
+      part_number: editBuf.part_number.trim() || null,
+      factory_cost: editBuf.factory_cost ? parseFloat(editBuf.factory_cost) : null,
+      notes: editBuf.notes.trim() || null,
+    }).eq('id', editingId)
     setSaving(false)
     if (error) { showToast('Failed to save changes', 'error'); return }
     showToast('Product updated'); setEditingId(null); onRefresh()
   }
 
   const deleteProduct = async (id: string) => {
-    if (!confirm('Remove this product?')) return
+    if (!confirm('Remove this product from the catalogue?')) return
     const { error } = await supabase.from('products').update({ is_active: false }).eq('id', id)
     if (error) { showToast('Failed to remove product', 'error'); return }
     showToast('Product removed'); onRefresh()
@@ -56,7 +64,13 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     if (!newBuf.description.trim()) { showToast('Description is required', 'error'); return }
     setSaving(true)
     const maxOrder = Math.max(0, ...products.filter((p) => p.category === newBuf.category).map((p) => p.sort_order))
-    const { error } = await supabase.from('products').insert({ description: newBuf.description.trim(), category: newBuf.category, part_number: newBuf.part_number.trim() || null, factory_cost: newBuf.factory_cost ? parseFloat(newBuf.factory_cost) : null, notes: newBuf.notes.trim() || null, sort_order: maxOrder + 10, is_active: true })
+    const { error } = await supabase.from('products').insert({
+      description: newBuf.description.trim(), category: newBuf.category,
+      part_number: newBuf.part_number.trim() || null,
+      factory_cost: newBuf.factory_cost ? parseFloat(newBuf.factory_cost) : null,
+      notes: newBuf.notes.trim() || null,
+      sort_order: maxOrder + 10, is_active: true,
+    })
     setSaving(false)
     if (error) { showToast('Failed to add product', 'error'); return }
     showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefresh()
@@ -76,15 +90,25 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
     <>
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search catalogue…" />
-        <div className="toolbar-right"><button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button></div>
+        <div className="toolbar-right">
+          <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button>
+        </div>
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>{filtered.length} product{filtered.length !== 1 ? 's' : ''}{search && ` matching "${search}"`}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>
+        {filtered.length} product{filtered.length !== 1 ? 's' : ''}{search && ` matching "${search}"`}
+      </div>
       <div className="card" style={{ overflow: 'auto' }}>
         <table className="admin-table">
-          <thead><tr>
-            <th>Description</th><th style={{ width: 140 }}>Category</th><th style={{ width: 110 }}>Part no.</th>
-            <th style={{ width: 100, textAlign: 'right' }}>Factory cost</th><th style={{ width: 160 }}>Notes</th><th style={{ width: 130, textAlign: 'right' }}>Actions</th>
-          </tr></thead>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style={{ width: 140 }}>Category</th>
+              <th style={{ width: 110 }}>Part no.</th>
+              <th style={{ width: 100, textAlign: 'right' }}>Factory cost</th>
+              <th style={{ width: 160 }}>Notes</th>
+              <th style={{ width: 130, textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {addingNew && (
               <>
@@ -118,10 +142,12 @@ function ProductsTab({ products, onRefresh, showToast }: { products: Product[]; 
                 <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
                 <td style={{ textAlign: 'right', fontWeight: 500 }}>{p.factory_cost != null ? `£${p.factory_cost.toFixed(2)}` : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>—</span>}</td>
                 <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{p.notes || '—'}</td>
-                <td><div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
-                </div></td>
+                <td>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -138,13 +164,11 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const [newLabourMins, setNewLabourMins] = useState('')
-  const [newLabourRate, setNewLabourRate] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
   const [editLabourMins, setEditLabourMins] = useState('')
-  const [editLabourRate, setEditLabourRate] = useState('')
   const [addItemProductId, setAddItemProductId] = useState('')
   const [addItemQty, setAddItemQty] = useState('1')
 
@@ -152,13 +176,16 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
     if (!newName.trim()) { showToast('Preset name is required', 'error'); return }
     setSaving(true)
     const { data, error } = await supabase.from('presets').insert({
-      name: newName.trim(), description: newDesc.trim() || null,
+      name: newName.trim(),
+      description: newDesc.trim() || null,
       default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null,
-      default_labour_rate_per_min: newLabourRate ? parseFloat(newLabourRate) : null,
+      default_labour_rate_per_min: null,
     }).select().single()
     setSaving(false)
     if (error || !data) { showToast('Failed to create preset', 'error'); return }
-    showToast('Preset created'); setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins(''); setNewLabourRate(''); setExpanded(data.id); onRefresh()
+    showToast('Preset created')
+    setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins('')
+    setExpanded(data.id); onRefresh()
   }
 
   const deletePreset = async (id: string) => {
@@ -169,17 +196,18 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   }
 
   const startEditPreset = (preset: Preset) => {
-    setEditingPresetId(preset.id); setEditName(preset.name); setEditDesc(preset.description ?? '')
+    setEditingPresetId(preset.id)
+    setEditName(preset.name)
+    setEditDesc(preset.description ?? '')
     setEditLabourMins(preset.default_labour_minutes != null ? String(preset.default_labour_minutes) : '')
-    setEditLabourRate(preset.default_labour_rate_per_min != null ? String(preset.default_labour_rate_per_min) : '')
   }
 
   const savePresetMeta = async (id: string) => {
     if (!editName.trim()) { showToast('Name is required', 'error'); return }
     const { error } = await supabase.from('presets').update({
-      name: editName.trim(), description: editDesc.trim() || null,
+      name: editName.trim(),
+      description: editDesc.trim() || null,
       default_labour_minutes: editLabourMins ? parseFloat(editLabourMins) : null,
-      default_labour_rate_per_min: editLabourRate ? parseFloat(editLabourRate) : null,
     }).eq('id', id)
     if (error) { showToast('Failed to update preset', 'error'); return }
     showToast('Preset updated'); setEditingPresetId(null); onRefresh()
@@ -188,24 +216,33 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   const addItem = async (presetId: string) => {
     if (!addItemProductId) { showToast('Select a product', 'error'); return }
     const qty = parseInt(addItemQty) || 1
-    const { error } = await supabase.from('preset_items').upsert({ preset_id: presetId, product_id: addItemProductId, quantity: qty }, { onConflict: 'preset_id,product_id' })
+    const { error } = await supabase.from('preset_items').upsert(
+      { preset_id: presetId, product_id: addItemProductId, quantity: qty },
+      { onConflict: 'preset_id,product_id' },
+    )
     if (error) { showToast('Failed to add item', 'error'); return }
     showToast('Item added'); setAddItemProductId(''); setAddItemQty('1'); onRefresh()
   }
 
-  const removeItem = async (itemId: string) => { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh() }
+  const removeItem = async (itemId: string) => {
+    await supabase.from('preset_items').delete().eq('id', itemId); onRefresh()
+  }
+
   const updateItemQty = async (itemId: string, qty: number) => {
     if (qty <= 0) { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh(); return }
     await supabase.from('preset_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
   }
 
-  const usedProductIds = (presetId: string) => new Set((presets.find((p) => p.id === presetId)?.preset_items ?? []).map((i) => i.product_id))
+  const usedProductIds = (presetId: string) =>
+    new Set((presets.find((p) => p.id === presetId)?.preset_items ?? []).map((i) => i.product_id))
 
   return (
     <>
       <div className="toolbar">
         <div style={{ fontSize: 13, color: 'var(--text-2)' }}>{presets.length} preset{presets.length !== 1 ? 's' : ''}</div>
-        <div className="toolbar-right"><button className="btn btn-primary" onClick={() => setCreatingNew(true)}>+ New preset</button></div>
+        <div className="toolbar-right">
+          <button className="btn btn-primary" onClick={() => setCreatingNew(true)}>+ New preset</button>
+        </div>
       </div>
 
       {creatingNew && (
@@ -215,25 +252,25 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
             <input className="input" placeholder="Preset name *" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ flex: 1, minWidth: 160 }} autoFocus />
             <input className="input" placeholder="Description (optional)" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} style={{ flex: 2, minWidth: 160 }} />
           </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Default labour (minutes)</label>
-              <input className="input input-sm" type="number" min="0" placeholder="Optional" value={newLabourMins} onChange={(e) => setNewLabourMins(e.target.value)} />
-            </div>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Default rate (£/min)</label>
-              <input className="input input-sm" type="number" min="0" step="0.0001" placeholder="Optional" value={newLabourRate} onChange={(e) => setNewLabourRate(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
-            </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
+              Default labour duration (minutes) — optional
+            </label>
+            <input className="input" style={{ maxWidth: 220 }} type="number" min="0" placeholder="e.g. 120" value={newLabourMins} onChange={(e) => setNewLabourMins(e.target.value)} />
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn btn-sm" onClick={() => { setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins(''); setNewLabourRate('') }}>Cancel</button>
+            <button className="btn btn-sm" onClick={() => { setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins('') }}>Cancel</button>
             <button className="btn btn-sm btn-primary" onClick={createPreset} disabled={saving}>{saving ? 'Creating…' : 'Create preset'}</button>
           </div>
         </div>
       )}
 
       {presets.length === 0 && !creatingNew && (
-        <div className="empty-state"><div className="empty-state-icon">⚡</div><h3>No presets yet</h3><p>Create a preset to let sales reps quickly populate the BOM</p></div>
+        <div className="empty-state">
+          <div className="empty-state-icon">⚡</div>
+          <h3>No presets yet</h3>
+          <p>Create a preset to let sales reps quickly populate the BOM with common configurations</p>
+        </div>
       )}
 
       {presets.map((preset) => {
@@ -253,9 +290,11 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                       <input className="input input-sm" value={editName} onChange={(e) => setEditName(e.target.value)} style={{ flex: 1, minWidth: 140 }} placeholder="Preset name *" />
                       <input className="input input-sm" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={{ flex: 2, minWidth: 140 }} placeholder="Description" />
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                      <input className="input input-sm" type="number" min="0" value={editLabourMins} onChange={(e) => setEditLabourMins(e.target.value)} placeholder="Labour minutes (default)" style={{ flex: 1, minWidth: 120 }} />
-                      <input className="input input-sm" type="number" min="0" step="0.0001" value={editLabourRate} onChange={(e) => setEditLabourRate(e.target.value)} placeholder="Labour rate £/min (default)" style={{ flex: 1, minWidth: 140, fontFamily: 'var(--mono)' }} />
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ display: 'block', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                        Default labour minutes
+                      </label>
+                      <input className="input input-sm" type="number" min="0" value={editLabourMins} onChange={(e) => setEditLabourMins(e.target.value)} placeholder="Optional" style={{ maxWidth: 160 }} />
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn btn-sm" onClick={() => setEditingPresetId(null)}>Cancel</button>
@@ -269,9 +308,9 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                       <span className="badge badge-preset">{items.length} items</span>
                     </div>
                     {preset.description && <div className="preset-admin-desc">{preset.description}</div>}
-                    {(preset.default_labour_minutes != null || preset.default_labour_rate_per_min != null) && (
+                    {preset.default_labour_minutes != null && (
                       <div style={{ fontSize: 12, color: 'var(--brand)', marginTop: 3 }}>
-                        Labour default: {preset.default_labour_minutes ?? 0} min @ £{(preset.default_labour_rate_per_min ?? 0).toFixed(4)}/min
+                        Labour default: {preset.default_labour_minutes} minutes
                       </div>
                     )}
                   </>
@@ -282,7 +321,9 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   <button className="btn btn-sm" onClick={() => { startEditPreset(preset); setExpanded(preset.id) }}>Edit</button>
                   <button className="btn btn-sm btn-danger" onClick={() => deletePreset(preset.id)}>Delete</button>
                   <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none', flexShrink: 0 }}
-                    viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
+                    viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
                 </div>
               )}
             </div>
@@ -294,23 +335,38 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   return (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ flex: 1, fontSize: 13 }}>
-                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
+                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown product'}</div>
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <input type="number" min="1" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
-                          value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
+                        <input
+                          type="number" min="1"
+                          style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
+                          value={item.quantity}
+                          onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)}
+                        />
                         <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Remove</button>
                       </div>
                     </div>
                   )
                 })}
+
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12 }}>
                   <div style={{ flex: 2, minWidth: 200 }}>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Add product</label>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
+                      Add product
+                    </label>
                     <select className="input input-sm" value={addItemProductId} onChange={(e) => setAddItemProductId(e.target.value)}>
                       <option value="">Select a product…</option>
-                      {CATEGORIES.map((cat) => { const cp = availableProducts.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+                      {CATEGORIES.map((cat) => {
+                        const cp = availableProducts.filter((p) => p.category === cat)
+                        if (!cp.length) return null
+                        return (
+                          <optgroup key={cat} label={cat}>
+                            {cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}
+                          </optgroup>
+                        )
+                      })}
                     </select>
                   </div>
                   <div style={{ width: 80 }}>
@@ -331,20 +387,35 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
 // ── Settings tab ──────────────────────────────────────────────
 function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings; onRefresh: () => void; showToast: Props['showToast'] }) {
   const [upliftPct, setUpliftPct] = useState(String(settings.hardware_uplift_pct))
+  const [labourRate, setLabourRate] = useState(String(settings.labour_rate_per_min))
   const [saving, setSaving] = useState(false)
 
-  const save = async () => {
-    const val = parseFloat(upliftPct)
-    if (isNaN(val) || val < 0 || val > 100) { showToast('Enter a valid percentage between 0 and 100', 'error'); return }
+  const saveSetting = async (key: string, value: string, min: number, max: number | null, label: string) => {
+    const val = parseFloat(value)
+    if (isNaN(val) || val < min || (max !== null && val > max)) {
+      showToast(`Enter a valid ${label}`, 'error'); return false
+    }
     setSaving(true)
-    const { error } = await supabase.from('settings').update({ value: String(val) }).eq('key', 'hardware_uplift_pct')
+    const { error } = await supabase.from('settings').update({ value: String(val) }).eq('key', key)
     setSaving(false)
-    if (error) { showToast('Failed to save setting', 'error'); return }
-    showToast('Settings saved'); onRefresh()
+    if (error) { showToast('Failed to save setting', 'error'); return false }
+    return true
+  }
+
+  const saveUplift = async () => {
+    const ok = await saveSetting('hardware_uplift_pct', upliftPct, 0, 100, 'percentage between 0 and 100')
+    if (ok) { showToast('Hardware uplift saved'); onRefresh() }
+  }
+
+  const saveLabour = async () => {
+    const ok = await saveSetting('labour_rate_per_min', labourRate, 0, null, 'labour rate')
+    if (ok) { showToast('Labour rate saved'); onRefresh() }
   }
 
   return (
-    <div style={{ maxWidth: 480 }}>
+    <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Hardware uplift */}
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Hardware uplift</h3>
         <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
@@ -366,9 +437,7 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
               <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: 'var(--text-3)', pointerEvents: 'none' }}>%</span>
             </div>
           </div>
-          <button className="btn btn-primary" onClick={save} disabled={saving} style={{ flexShrink: 0 }}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          <button className="btn btn-primary" onClick={saveUplift} disabled={saving} style={{ flexShrink: 0 }}>Save</button>
         </div>
         {upliftPct && !isNaN(parseFloat(upliftPct)) && (
           <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--secondary-light)', border: '1px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--secondary-text)' }}>
@@ -376,6 +445,38 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
           </div>
         )}
       </div>
+
+      {/* Labour rate */}
+      <div className="card" style={{ padding: '20px 24px' }}>
+        <h3 style={{ marginBottom: 4 }}>Labour rate</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>
+          Cost per minute of labour. Sales reps enter the duration in minutes — this rate is applied automatically. Not visible to sales reps.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Rate (£ per minute)
+            </label>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: 'var(--text-3)', pointerEvents: 'none' }}>£</span>
+              <input
+                className="input"
+                type="number" min="0" step="0.0001"
+                value={labourRate}
+                onChange={(e) => setLabourRate(e.target.value)}
+                style={{ paddingLeft: 28, fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }}
+              />
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={saveLabour} disabled={saving} style={{ flexShrink: 0 }}>Save</button>
+        </div>
+        {labourRate && !isNaN(parseFloat(labourRate)) && parseFloat(labourRate) > 0 && (
+          <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--brand)' }}>
+            Example: 60 minutes → <strong>£{(60 * parseFloat(labourRate)).toFixed(2)}</strong> labour cost
+          </div>
+        )}
+      </div>
+
     </div>
   )
 }
@@ -387,12 +488,20 @@ export default function AdminPanel({ products, presets, settings, onRefreshProdu
   return (
     <>
       <div className="admin-tabs">
-        <button className={`admin-tab ${tab === 'products' ? 'active' : ''}`} onClick={() => setTab('products')}>Product catalogue</button>
+        <button className={`admin-tab ${tab === 'products' ? 'active' : ''}`} onClick={() => setTab('products')}>
+          Product catalogue
+        </button>
         <button className={`admin-tab ${tab === 'presets' ? 'active' : ''}`} onClick={() => setTab('presets')}>
           Presets
-          {presets.length > 0 && <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>{presets.length}</span>}
+          {presets.length > 0 && (
+            <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>
+              {presets.length}
+            </span>
+          )}
         </button>
-        <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
+        <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>
+          Settings
+        </button>
       </div>
 
       {tab === 'products' && <ProductsTab products={products} onRefresh={onRefreshProducts} showToast={showToast} />}

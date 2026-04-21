@@ -78,13 +78,15 @@ function PresetsBar({ presets, products, onApply }: { presets: Preset[]; product
                   </div>
                 )
               })}
-              {(previewPreset.default_labour_minutes != null || previewPreset.default_labour_rate_per_min != null) && (
+              {previewPreset.default_labour_minutes != null && (
                 <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--brand-light)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--brand)' }}>
-                  Labour defaults: {previewPreset.default_labour_minutes ?? 0} min @ £{(previewPreset.default_labour_rate_per_min ?? 0).toFixed(4)}/min
+                  Labour default: {previewPreset.default_labour_minutes} minutes
                 </div>
               )}
             </div>
-            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>Quantities will be added to your current BOM. You can adjust them afterwards.</p>
+            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
+              Quantities will be added to your current BOM. You can adjust them afterwards.
+            </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setPreviewPreset(null)}>Cancel</button>
               <button className="btn btn-secondary" onClick={() => { onApply(previewPreset); setPreviewPreset(null) }}>Apply preset</button>
@@ -101,7 +103,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
-  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', notes: '', labour_minutes: '', labour_rate_per_min: '' })
+  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', notes: '', labour_minutes: '' })
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => { const next = new Set(prev); next.has(cat) ? next.delete(cat) : next.add(cat); return next })
@@ -110,7 +112,11 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
   const filtered = useMemo(() => {
     if (!search.trim()) return products
     const q = search.toLowerCase()
-    return products.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
+    return products.filter((p) =>
+      p.description.toLowerCase().includes(q) ||
+      (p.part_number ?? '').toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q),
+    )
   }, [products, search])
 
   const byCategory = useMemo(() => {
@@ -124,12 +130,12 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
   const activeCount = activeItems.length
   const searchActive = search.trim().length > 0
 
-  // ── Totals calculation ─────────────────────────────────────
+  // ── Totals ─────────────────────────────────────────────────
   const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (quantities[p.id] ?? 0) : 0), 0)
   const upliftPct = settings.hardware_uplift_pct
   const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
   const labourMinutes = parseFloat(quoteForm.labour_minutes) || 0
-  const labourRate = parseFloat(quoteForm.labour_rate_per_min) || 0
+  const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
   const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
 
@@ -149,7 +155,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
     setSaving(true)
     const ok = await onSave(saveForm)
     setSaving(false)
-    if (ok) { setShowSaveModal(false); setSaveForm({ project_name: '', customer_name: '', notes: '', labour_minutes: '', labour_rate_per_min: '' }) }
+    if (ok) { setShowSaveModal(false); setSaveForm({ project_name: '', customer_name: '', notes: '', labour_minutes: '' }) }
   }
 
   const handlePdf = () => {
@@ -184,29 +190,46 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
 
       {/* Quote info */}
       <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>Quote details</div>
+        <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>
+          Quote details
+        </div>
         <div className="quote-info-grid">
           <input className="input" placeholder="Project name *" value={quoteForm.project_name} onChange={(e) => setQuoteForm({ ...quoteForm, project_name: e.target.value })} />
           <input className="input" placeholder="Customer name" value={quoteForm.customer_name} onChange={(e) => setQuoteForm({ ...quoteForm, customer_name: e.target.value })} />
         </div>
         <input className="input" placeholder="Notes (optional)" value={quoteForm.notes} onChange={(e) => setQuoteForm({ ...quoteForm, notes: e.target.value })} style={{ marginTop: 10 }} />
 
-        {/* Labour */}
+        {/* Labour — duration only, rate is admin-controlled */}
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>Labour</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Duration (minutes)</label>
-              <input className="input" type="number" min="0" step="1" placeholder="0" value={quoteForm.labour_minutes} onChange={(e) => setQuoteForm({ ...quoteForm, labour_minutes: e.target.value })} />
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>
+            Labour
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>
+                Duration (minutes)
+              </label>
+              <input
+                className="input"
+                type="number" min="0" step="1"
+                placeholder="0"
+                value={quoteForm.labour_minutes}
+                onChange={(e) => setQuoteForm({ ...quoteForm, labour_minutes: e.target.value })}
+              />
             </div>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Rate (£ per minute)</label>
-              <input className="input" type="number" min="0" step="0.0001" placeholder="0.0000" value={quoteForm.labour_rate_per_min} onChange={(e) => setQuoteForm({ ...quoteForm, labour_rate_per_min: e.target.value })} style={{ fontFamily: 'var(--mono)' }} />
-            </div>
+            {labourRate > 0 && (
+              <div style={{ paddingBottom: 1 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Rate</div>
+                <div style={{ height: 42, display: 'flex', alignItems: 'center', padding: '0 12px', background: 'var(--surface-3)', borderRadius: 'var(--radius-md)', fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}>
+                  £{labourRate.toFixed(4)}/min
+                </div>
+              </div>
+            )}
             {labourTotal > 0 && (
-              <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 1 }}>
-                <div style={{ background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', padding: '8px 14px', fontSize: 14, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}>
-                  Labour: £{labourTotal.toFixed(2)}
+              <div style={{ paddingBottom: 1 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Labour total</div>
+                <div style={{ height: 42, display: 'flex', alignItems: 'center', padding: '0 14px', background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', fontSize: 14, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}>
+                  £{labourTotal.toFixed(2)}
                 </div>
               </div>
             )}
@@ -214,7 +237,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         </div>
       </div>
 
-      {/* Search — under quote details */}
+      {/* Search — below quote details */}
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" />
       </div>
@@ -239,16 +262,23 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
             <div className="category-header" onClick={() => !searchActive && toggleCategory(cat)}>
               <span className="category-label">{cat}</span>
               <span className="category-count">
-                {catQty > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 8px', fontSize: 10, fontWeight: 700 }}>{catQty} selected</span>}
+                {catQty > 0 && (
+                  <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 8px', fontSize: 10, fontWeight: 700 }}>
+                    {catQty} selected
+                  </span>
+                )}
                 {items.length} items
                 {!searchActive && (
-                  <svg className={`category-chevron ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
+                  <svg className={`category-chevron ${isOpen ? 'open' : ''}`} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
                 )}
               </span>
             </div>
 
             {isOpen && (
               <>
+                {/* Desktop table */}
                 <div className="card" style={{ marginBottom: 4 }}>
                   <table className="product-table">
                     <thead>
@@ -266,10 +296,17 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
                         const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
                         return (
                           <tr key={p.id}>
-                            <td><div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>{p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}</td>
+                            <td>
+                              <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
+                              {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
+                            </td>
                             <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
-                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div></td>
+                            <td className="right">
+                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <Stepper value={qty} onChange={(n) => setQty(p.id, n)} />
+                              </div>
+                            </td>
                             <td className="right" style={{ fontWeight: qty > 0 ? 600 : 400 }}>
                               {lineTotal != null ? fmt(lineTotal) : qty > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}
                             </td>
@@ -280,6 +317,7 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
                   </table>
                 </div>
 
+                {/* Mobile cards */}
                 <div className="product-cards">
                   {items.map((p) => {
                     const qty = quantities[p.id] ?? 0
@@ -294,8 +332,15 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div>
                         </div>
                         <div className="product-card-meta">
-                          <span className="product-card-cost">{p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}<span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginLeft: 4 }}>each</span></span>
-                          {qty > 0 && <span className="product-card-total">Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}</span>}
+                          <span className="product-card-cost">
+                            {p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}
+                            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginLeft: 4 }}>each</span>
+                          </span>
+                          {qty > 0 && (
+                            <span className="product-card-total">
+                              Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )
@@ -307,10 +352,12 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         )
       })}
 
-      {/* Cost breakdown summary (shown when items added) */}
+      {/* Cost breakdown summary */}
       {activeCount > 0 && (
         <div className="card" style={{ marginTop: 16, padding: '14px 16px' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>Cost breakdown</div>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>
+            Cost breakdown
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
               <span style={{ color: 'var(--text-2)' }}>Materials subtotal</span>
@@ -328,7 +375,8 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
             {labourTotal > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                 <span style={{ color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min @ £{labourRate.toFixed(4)}/min)</span>
+                  Labour
+                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min @ £{labourRate.toFixed(4)}/min)</span>
                 </span>
                 <span style={{ fontWeight: 500, color: 'var(--brand)' }}>£{labourTotal.toFixed(2)}</span>
               </div>
@@ -346,12 +394,29 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
         <div>
           <div className="total-bar-label">Grand total</div>
           <div className="total-bar-amount">{`£${grandTotal.toFixed(2)}`}</div>
-          {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
+          {activeCount > 0 && (
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+              {activeCount} line item{activeCount !== 1 ? 's' : ''}
+            </div>
+          )}
         </div>
         <div className="total-bar-actions">
-          {activeCount > 0 && <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
-          <button className="btn" style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }} onClick={handlePdf}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+          {activeCount > 0 && (
+            <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>
+              Clear
+            </button>
+          )}
+          <button
+            className="btn"
+            style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }}
+            onClick={handlePdf}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="12" y1="18" x2="12" y2="12" />
+              <line x1="9" y1="15" x2="15" y2="15" />
+            </svg>
             PDF
           </button>
           <button className="btn btn-secondary" onClick={openSaveModal}>Save quote</button>
@@ -374,7 +439,9 @@ export default function QuoteBuilder({ products, loading, quantities, setQty, qu
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setShowSaveModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save quote'}</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save quote'}
+              </button>
             </div>
           </div>
         </div>
