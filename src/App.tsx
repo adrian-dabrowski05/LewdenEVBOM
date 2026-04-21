@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
-import type { Product, Quote, Preset, View, QuantityMap, QuoteFormData } from './types'
+import type { Product, Quote, Preset, View, QuantityMap, QuoteFormData, AppSettings } from './types'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -9,9 +9,11 @@ import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
 import Toast from './components/Toast'
 
-export interface ToastState {
-  message: string
-  type: 'success' | 'error'
+export interface ToastState { message: string; type: 'success' | 'error' }
+
+const DEFAULT_FORM: QuoteFormData = {
+  project_name: '', customer_name: '', notes: '',
+  labour_minutes: '', labour_rate_per_min: '',
 }
 
 export default function App() {
@@ -21,18 +23,13 @@ export default function App() {
 
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
-
   const [presets, setPresets] = useState<Preset[]>([])
-
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
+  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5 })
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
-  const [quoteForm, setQuoteForm] = useState<QuoteFormData>({
-    project_name: '',
-    customer_name: '',
-    notes: '',
-  })
+  const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
 
   const [toast, setToast] = useState<ToastState | null>(null)
 
@@ -43,14 +40,9 @@ export default function App() {
 
   // ── Load products ──────────────────────────────────────────
   useEffect(() => { loadProducts() }, [])
-
   const loadProducts = async () => {
     setProductsLoading(true)
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
+    const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('sort_order')
     if (error) showToast('Failed to load products', 'error')
     else setProducts(data || [])
     setProductsLoading(false)
@@ -58,13 +50,20 @@ export default function App() {
 
   // ── Load presets ───────────────────────────────────────────
   useEffect(() => { loadPresets() }, [])
-
   const loadPresets = async () => {
-    const { data, error } = await supabase
-      .from('presets')
-      .select('*, preset_items(*)')
-      .order('created_at', { ascending: true })
+    const { data, error } = await supabase.from('presets').select('*, preset_items(*)').order('created_at')
     if (!error) setPresets(data || [])
+  }
+
+  // ── Load settings ──────────────────────────────────────────
+  useEffect(() => { loadSettings() }, [])
+  const loadSettings = async () => {
+    const { data } = await supabase.from('settings').select('*')
+    if (data) {
+      const map: Record<string, string> = {}
+      data.forEach((row) => { map[row.key] = row.value })
+      setSettings({ hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5') })
+    }
   }
 
   // ── Apply preset ───────────────────────────────────────────
@@ -77,16 +76,21 @@ export default function App() {
       })
       return next
     })
+    // Fill labour defaults if set
+    if (preset.default_labour_minutes != null || preset.default_labour_rate_per_min != null) {
+      setQuoteForm((prev) => ({
+        ...prev,
+        labour_minutes: preset.default_labour_minutes != null ? String(preset.default_labour_minutes) : prev.labour_minutes,
+        labour_rate_per_min: preset.default_labour_rate_per_min != null ? String(preset.default_labour_rate_per_min) : prev.labour_rate_per_min,
+      }))
+    }
     showToast(`Preset "${preset.name}" applied`)
   }, [showToast])
 
   // ── Load quotes ────────────────────────────────────────────
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
-    const { data, error } = await supabase
-      .from('quotes')
-      .select('*, quote_items(*)')
-      .order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('quotes').select('*, quote_items(*)').order('created_at', { ascending: false })
     if (error) showToast('Failed to load quotes', 'error')
     else setQuotes(data || [])
     setQuotesLoading(false)
@@ -99,26 +103,31 @@ export default function App() {
     const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
     if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
-    const grandTotal = activeItems.reduce((sum, p) => {
-      const qty = quantities[p.id] ?? 0
-      return sum + (p.factory_cost != null ? p.factory_cost * qty : 0)
-    }, 0)
+    const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (quantities[p.id] ?? 0) : 0), 0)
+    const upliftPct = settings.hardware_uplift_pct
+    const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
+    const labourMinutes = parseFloat(formData.labour_minutes) || 0
+    const labourRate = parseFloat(formData.labour_rate_per_min) || 0
+    const labourTotal = labourMinutes * labourRate
+    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
 
-    const { data: quoteData, error: quoteError } = await supabase
-      .from('quotes')
-      .insert({
-        project_name: formData.project_name.trim(),
-        customer_name: formData.customer_name.trim() || null,
-        notes: formData.notes.trim() || null,
-        grand_total: grandTotal,
-        status: 'draft',
-      })
-      .select()
-      .single()
+    const { data: quoteData, error: quoteError } = await supabase.from('quotes').insert({
+      project_name: formData.project_name.trim(),
+      customer_name: formData.customer_name.trim() || null,
+      notes: formData.notes.trim() || null,
+      grand_total: grandTotal,
+      materials_subtotal: materialsSubtotal,
+      hardware_uplift_pct: upliftPct,
+      hardware_uplift_amount: hardwareUpliftAmount,
+      labour_minutes: labourMinutes,
+      labour_rate_per_min: labourRate,
+      labour_total: labourTotal,
+      status: 'draft',
+    }).select().single()
 
     if (quoteError || !quoteData) { showToast('Failed to save quote', 'error'); return false }
 
-    const items = activeItems.map((p) => ({
+    const itemsToInsert = activeItems.map((p) => ({
       quote_id: quoteData.id,
       product_id: p.id,
       description: p.description,
@@ -128,12 +137,12 @@ export default function App() {
       line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
     }))
 
-    const { error: itemsError } = await supabase.from('quote_items').insert(items)
+    const { error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert)
     if (itemsError) { showToast('Quote saved but items failed to save', 'error'); return false }
 
     showToast('Quote saved successfully')
     setQuantities({})
-    setQuoteForm({ project_name: '', customer_name: '', notes: '' })
+    setQuoteForm(DEFAULT_FORM)
     return true
   }
 
@@ -162,13 +171,7 @@ export default function App() {
   }, [])
 
   const handleAdminNav = () => { isAdmin ? setView('admin') : setShowAdminLogin(true) }
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    setIsAdmin(false)
-    setView('builder')
-    showToast('Signed out')
-  }
+  const handleLogout = async () => { await supabase.auth.signOut(); setIsAdmin(false); setView('builder'); showToast('Signed out') }
 
   // ── Qty helpers ────────────────────────────────────────────
   const setQty = useCallback((productId: string, qty: number) => {
@@ -177,11 +180,6 @@ export default function App() {
       return { ...prev, [productId]: qty }
     })
   }, [])
-
-  const grandTotal = products.reduce((sum, p) => {
-    const qty = quantities[p.id] ?? 0
-    return sum + (p.factory_cost != null ? p.factory_cost * qty : 0)
-  }, 0)
 
   const activeCount = Object.values(quantities).filter((q) => q > 0).length
 
@@ -192,31 +190,25 @@ export default function App() {
       <main className="main">
         {view === 'builder' && (
           <QuoteBuilder
-            products={products}
-            loading={productsLoading}
-            quantities={quantities}
-            setQty={setQty}
-            grandTotal={grandTotal}
-            quoteForm={quoteForm}
-            setQuoteForm={setQuoteForm}
-            onSave={saveQuote}
-            showToast={showToast}
-            presets={presets}
-            onApplyPreset={applyPreset}
+            products={products} loading={productsLoading}
+            quantities={quantities} setQty={setQty}
+            quoteForm={quoteForm} setQuoteForm={setQuoteForm}
+            onSave={saveQuote} showToast={showToast}
+            presets={presets} onApplyPreset={applyPreset}
+            settings={settings}
           />
         )}
-
         {view === 'quotes' && (
           <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} isAdmin={isAdmin} />
         )}
-
         {view === 'admin' && isAdmin && (
-          <AdminPanel products={products} presets={presets} onRefreshProducts={loadProducts} onRefreshPresets={loadPresets} showToast={showToast} />
+          <AdminPanel products={products} presets={presets} settings={settings}
+            onRefreshProducts={loadProducts} onRefreshPresets={loadPresets} onRefreshSettings={loadSettings}
+            showToast={showToast} />
         )}
       </main>
 
       <BottomNav view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} activeCount={activeCount} />
-
       {showAdminLogin && <AdminLogin onClose={() => setShowAdminLogin(false)} showToast={showToast} />}
       {toast && <Toast message={toast.message} type={toast.type} />}
     </>

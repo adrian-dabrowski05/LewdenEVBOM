@@ -38,6 +38,12 @@ export interface Quote {
   customer_name: string | null
   notes: string | null
   grand_total: number
+  materials_subtotal: number
+  hardware_uplift_pct: number
+  hardware_uplift_amount: number
+  labour_minutes: number
+  labour_rate_per_min: number
+  labour_total: number
   status: QuoteStatus
   created_at: string
   updated_at: string
@@ -59,6 +65,8 @@ export interface Preset {
   id: string
   name: string
   description: string | null
+  default_labour_minutes: number | null
+  default_labour_rate_per_min: number | null
   created_at: string
   updated_at: string
   preset_items?: PresetItem[]
@@ -81,4 +89,10 @@ export interface QuoteFormData {
   project_name: string
   customer_name: string
   notes: string
+  labour_minutes: string
+  labour_rate_per_min: string
+}
+
+export interface AppSettings {
+  hardware_uplift_pct: number
 }
