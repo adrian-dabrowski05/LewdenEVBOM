@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, activeCount }: Props) {
-  const logoSrc = `${import.meta.env.BASE_URL}logo.png`
+  const logoSrc = `${(import.meta as any).env.BASE_URL}logo.png`
 
   return (
     <header className="header">
