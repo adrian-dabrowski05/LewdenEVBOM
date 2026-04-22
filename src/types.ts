@@ -40,6 +40,16 @@ export interface ProductVariant {
   created_at: string
 }
 
+export interface ProductPrerequisite {
+  id: string
+  product_id: string
+  prerequisite_product_id: string
+  quantity: number
+  note: string | null
+  sort_order: number
+  created_at: string
+}
+
 export interface Quote {
   id: string
   project_name: string
@@ -96,9 +106,16 @@ export interface QuantityMap {
   [productId: string]: number
 }
 
-// Maps productId → selected variant id
 export interface VariantSelectionMap {
   [productId: string]: string
+}
+
+// Tracks which product IDs were auto-added as prerequisites and how many
+// Key: prerequisite productId, Value: map of { parentProductId → qty added }
+export interface AutoAddedMap {
+  [prereqProductId: string]: {
+    [parentProductId: string]: number
+  }
 }
 
 export interface QuoteFormData {

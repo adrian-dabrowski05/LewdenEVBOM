@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
-import type { Product, ProductVariant, Quote, Preset, View, QuantityMap, VariantSelectionMap, QuoteFormData, AppSettings } from './types'
+import type {
+  Product, ProductVariant, ProductPrerequisite, Quote, Preset,
+  View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
+} from './types'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -23,6 +26,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [variants, setVariants] = useState<ProductVariant[]>([])
+  const [prerequisites, setPrerequisites] = useState<ProductPrerequisite[]>([])
   const [presets, setPresets] = useState<Preset[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
@@ -30,16 +34,17 @@ export default function App() {
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
   const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
+  // Tracks auto-added prereq quantities so we can cleanly remove them
+  const [autoAdded, setAutoAdded] = useState<AutoAddedMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
 
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 3000)
+    setTimeout(() => setToast(null), 3500)
   }, [])
 
-  // ── Load products ──────────────────────────────────────────
   useEffect(() => { loadProducts() }, [])
   const loadProducts = async () => {
     setProductsLoading(true)
@@ -49,21 +54,24 @@ export default function App() {
     setProductsLoading(false)
   }
 
-  // ── Load variants ──────────────────────────────────────────
   useEffect(() => { loadVariants() }, [])
   const loadVariants = async () => {
     const { data } = await supabase.from('product_variants').select('*').order('sort_order')
     if (data) setVariants(data)
   }
 
-  // ── Load presets ───────────────────────────────────────────
+  useEffect(() => { loadPrerequisites() }, [])
+  const loadPrerequisites = async () => {
+    const { data } = await supabase.from('product_prerequisites').select('*').order('sort_order')
+    if (data) setPrerequisites(data)
+  }
+
   useEffect(() => { loadPresets() }, [])
   const loadPresets = async () => {
     const { data, error } = await supabase.from('presets').select('*, preset_items(*)').order('created_at')
     if (!error) setPresets(data || [])
   }
 
-  // ── Load settings ──────────────────────────────────────────
   useEffect(() => { loadSettings() }, [])
   const loadSettings = async () => {
     const { data } = await supabase.from('settings').select('*')
@@ -77,23 +85,86 @@ export default function App() {
     }
   }
 
+  // ── Smart qty setter with prereq auto-add/remove ───────────
+  const setQty = useCallback((productId: string, qty: number, prereqsRef?: ProductPrerequisite[]) => {
+    const prereqs = prereqsRef ?? prerequisites
+
+    setQuantities((prevQtys) => {
+      const prevQty = prevQtys[productId] ?? 0
+      const newQtys = { ...prevQtys }
+
+      if (qty <= 0) {
+        delete newQtys[productId]
+        // Clear variant selection
+        setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
+      } else {
+        newQtys[productId] = qty
+      }
+
+      // Find all prereqs for this product
+      const productPrereqs = prereqs.filter((p) => p.product_id === productId)
+      if (productPrereqs.length === 0) return newQtys
+
+      // Update auto-added tracking and prereq quantities
+      setAutoAdded((prevAuto) => {
+        const newAuto = { ...prevAuto }
+
+        if (qty <= 0 && prevQty > 0) {
+          // Product removed — remove auto-added prereq quantities
+          productPrereqs.forEach((prereq) => {
+            const autoEntry = newAuto[prereq.prerequisite_product_id]
+            if (autoEntry && autoEntry[productId] != null) {
+              const wasAutoAdded = autoEntry[productId]
+              const newAutoEntry = { ...autoEntry }
+              delete newAutoEntry[productId]
+              if (Object.keys(newAutoEntry).length === 0) {
+                delete newAuto[prereq.prerequisite_product_id]
+              } else {
+                newAuto[prereq.prerequisite_product_id] = newAutoEntry
+              }
+              // Reduce prereq qty by what was auto-added
+              const currentPrereqQty = newQtys[prereq.prerequisite_product_id] ?? 0
+              const reduced = currentPrereqQty - wasAutoAdded
+              if (reduced <= 0) {
+                delete newQtys[prereq.prerequisite_product_id]
+              } else {
+                newQtys[prereq.prerequisite_product_id] = reduced
+              }
+            }
+          })
+        } else if (qty > 0 && prevQty <= 0) {
+          // Product newly added — auto-add prereq quantities
+          productPrereqs.forEach((prereq) => {
+            const addQty = prereq.quantity
+            newQtys[prereq.prerequisite_product_id] = (newQtys[prereq.prerequisite_product_id] ?? 0) + addQty
+            // Track what we auto-added
+            if (!newAuto[prereq.prerequisite_product_id]) {
+              newAuto[prereq.prerequisite_product_id] = {}
+            }
+            newAuto[prereq.prerequisite_product_id][productId] = addQty
+          })
+        }
+
+        return newAuto
+      })
+
+      return newQtys
+    })
+  }, [prerequisites])
+
   // ── Apply preset ───────────────────────────────────────────
   const applyPreset = useCallback((preset: Preset) => {
     if (!preset.preset_items?.length) return
-    setQuantities((prev) => {
-      const next = { ...prev }
-      preset.preset_items!.forEach((item) => {
-        next[item.product_id] = (next[item.product_id] ?? 0) + item.quantity
-      })
-      return next
+    // Apply preset items using smart setQty for each
+    preset.preset_items.forEach((item) => {
+      setQty(item.product_id, item.quantity, prerequisites)
     })
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
-  }, [showToast])
+  }, [prerequisites, setQty, showToast])
 
-  // ── Load quotes ────────────────────────────────────────────
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
     const { data, error } = await supabase.from('quotes').select('*, quote_items(*)').order('created_at', { ascending: false })
@@ -104,7 +175,6 @@ export default function App() {
 
   useEffect(() => { if (view === 'quotes') loadQuotes() }, [view, loadQuotes])
 
-  // ── Save quote ─────────────────────────────────────────────
   const saveQuote = async (formData: QuoteFormData): Promise<boolean> => {
     const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
     if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
@@ -156,25 +226,23 @@ export default function App() {
     showToast('Quote saved successfully')
     setQuantities({})
     setVariantSelections({})
+    setAutoAdded({})
     setQuoteForm(DEFAULT_FORM)
     return true
   }
 
-  // ── Update quote status ────────────────────────────────────
   const updateQuoteStatus = async (quoteId: string, status: string) => {
     const { error } = await supabase.from('quotes').update({ status }).eq('id', quoteId)
     if (error) showToast('Failed to update status', 'error')
     else setQuotes((prev) => prev.map((q) => q.id === quoteId ? { ...q, status: status as Quote['status'] } : q))
   }
 
-  // ── Delete quote ───────────────────────────────────────────
   const deleteQuote = async (quoteId: string) => {
     const { error } = await supabase.from('quotes').delete().eq('id', quoteId)
     if (error) showToast('Failed to delete quote', 'error')
     else { setQuotes((prev) => prev.filter((q) => q.id !== quoteId)); showToast('Quote deleted') }
   }
 
-  // ── Admin auth ─────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setIsAdmin(!!session))
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -186,20 +254,6 @@ export default function App() {
 
   const handleAdminNav = () => { isAdmin ? setView('admin') : setShowAdminLogin(true) }
   const handleLogout = async () => { await supabase.auth.signOut(); setIsAdmin(false); setView('builder'); showToast('Signed out') }
-
-  // ── Qty helpers ────────────────────────────────────────────
-  const setQty = useCallback((productId: string, qty: number) => {
-    setQuantities((prev) => {
-      if (qty <= 0) {
-        const next = { ...prev }
-        delete next[productId]
-        // Clear variant selection if qty removed
-        setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
-        return next
-      }
-      return { ...prev, [productId]: qty }
-    })
-  }, [])
 
   const setVariantSelection = useCallback((productId: string, variantId: string) => {
     setVariantSelections((prev) => ({ ...prev, [productId]: variantId }))
@@ -215,7 +269,8 @@ export default function App() {
         {view === 'builder' && (
           <QuoteBuilder
             products={products} loading={productsLoading}
-            variants={variants}
+            variants={variants} prerequisites={prerequisites}
+            autoAdded={autoAdded}
             quantities={quantities} setQty={setQty}
             variantSelections={variantSelections} setVariantSelection={setVariantSelection}
             quoteForm={quoteForm} setQuoteForm={setQuoteForm}
@@ -229,9 +284,11 @@ export default function App() {
         )}
         {view === 'admin' && isAdmin && (
           <AdminPanel
-            products={products} presets={presets} settings={settings} variants={variants}
+            products={products} presets={presets} settings={settings}
+            variants={variants} prerequisites={prerequisites}
             onRefreshProducts={loadProducts} onRefreshPresets={loadPresets}
             onRefreshSettings={loadSettings} onRefreshVariants={loadVariants}
+            onRefreshPrerequisites={loadPrerequisites}
             showToast={showToast}
           />
         )}
