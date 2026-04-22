@@ -32,6 +32,7 @@ interface EditRowProps {
 function EditRow({ buf, onBuf }: EditRowProps) {
   return (
     <tr className="editing-row">
+      <td></td>
       <td style={{ minWidth: 200 }}>
         <input className="input input-sm" value={buf.description} onChange={(e) => onBuf({ ...buf, description: e.target.value })} placeholder="Description *" />
       </td>
@@ -413,11 +414,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
           <tbody>
             {addingNew && (
               <>
-                <tr style={{ background: 'var(--brand-light)' }}>
-                  <td></td>
-                  {/* EditRow is defined outside — stable reference, no remount */}
-                  <EditRow buf={newBuf} onBuf={setNewBuf} />
-                </tr>
+                <EditRow buf={newBuf} onBuf={setNewBuf} />
                 <tr style={{ background: 'var(--brand-light)' }}>
                   <td colSpan={7} style={{ paddingTop: 6, paddingBottom: 6 }}>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -440,10 +437,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                 <Fragment key={p.id}>
                   {isEditingThis ? (
                     <>
-                      <tr style={{ background: 'var(--brand-light)' }}>
-                        <td></td>
-                        <EditRow buf={editBuf} onBuf={setEditBuf} />
-                      </tr>
+                      <EditRow buf={editBuf} onBuf={setEditBuf} />
                       <tr style={{ background: 'var(--brand-light)' }}>
                         <td colSpan={7} style={{ paddingTop: 6, paddingBottom: 6 }}>
                           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
