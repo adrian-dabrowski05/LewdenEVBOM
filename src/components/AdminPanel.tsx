@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, Category, AppSettings } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
