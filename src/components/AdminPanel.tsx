@@ -512,7 +512,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
               const currentPanel = openPanel?.id === p.id ? openPanel.panel : null
 
               return (
-                <>
+                <Fragment key={p.id}>
                   {isEditingThis ? (
                     <>
                       <EditRow key={`e-${p.id}`} buf={editBuf} onBuf={setEditBuf} />
@@ -570,7 +570,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               )
             })}
           </tbody>
