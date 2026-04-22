@@ -36,6 +36,7 @@ export interface ProductVariant {
   id: string
   product_id: string
   label: string
+  part_number_suffix: string | null
   sort_order: number
   created_at: string
 }
@@ -110,8 +111,6 @@ export interface VariantSelectionMap {
   [productId: string]: string
 }
 
-// Tracks which product IDs were auto-added as prerequisites and how many
-// Key: prerequisite productId, Value: map of { parentProductId → qty added }
 export interface AutoAddedMap {
   [prereqProductId: string]: {
     [parentProductId: string]: number
