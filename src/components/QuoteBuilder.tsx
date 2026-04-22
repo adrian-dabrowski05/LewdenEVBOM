@@ -29,6 +29,15 @@ interface Props {
 
 const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
 
+// Returns the full part number for a product, including variant suffix if selected
+function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
+  if (!variant) return product.part_number
+  if (!variant.part_number_suffix) return product.part_number
+  return product.part_number
+    ? `${product.part_number}${variant.part_number_suffix}`
+    : variant.part_number_suffix
+}
+
 function Stepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
     <div className="stepper">
@@ -115,13 +124,14 @@ export default function QuoteBuilder({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
-  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '' })
+  const [saveForm, setSaveForm] = useState<QuoteFormData>({
+    project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '',
+  })
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => { const next = new Set(prev); next.has(cat) ? next.delete(cat) : next.add(cat); return next })
   }
 
-  // Index lookups
   const variantsByProduct = useMemo(() => {
     const map: Record<string, ProductVariant[]> = {}
     variants.forEach((v) => { if (!map[v.product_id]) map[v.product_id] = []; map[v.product_id].push(v) })
@@ -140,10 +150,14 @@ export default function QuoteBuilder({
     return map
   }, [products])
 
-  // Which products are auto-added (prereqs of something) — for display annotation
+  const variantsById = useMemo(() => {
+    const map: Record<string, ProductVariant> = {}
+    variants.forEach((v) => { map[v.id] = v })
+    return map
+  }, [variants])
+
   const autoAddedProductIds = useMemo(() => new Set(Object.keys(autoAdded)), [autoAdded])
 
-  // For a given prereq product, which parent products triggered it
   const autoAddedParents = useMemo(() => {
     const map: Record<string, string[]> = {}
     Object.entries(autoAdded).forEach(([prereqId, parents]) => {
@@ -211,10 +225,13 @@ export default function QuoteBuilder({
       form: { project_name: quoteForm.project_name, customer_name: quoteForm.customer_name, mo_number: quoteForm.mo_number, notes: quoteForm.notes },
       items: activeItems.map((p) => {
         const selectedVariantId = variantSelections[p.id]
-        const selectedVariant = selectedVariantId ? variants.find((v) => v.id === selectedVariantId) : null
+        const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
         return {
-          description: p.description, part_number: p.part_number, factory_cost: p.factory_cost,
-          quantity: quantities[p.id], line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
+          description: p.description,
+          part_number: getDisplayPartNumber(p, selectedVariant ?? null),
+          factory_cost: p.factory_cost,
+          quantity: quantities[p.id],
+          line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
           variant_label: selectedVariant?.label ?? null,
         }
       }),
@@ -224,7 +241,7 @@ export default function QuoteBuilder({
     })
   }
 
-  // ── Prereq note shown under a product ─────────────────────
+  // ── Prereq note ────────────────────────────────────────────
   const renderPrereqNote = (p: Product, isMobile = false) => {
     const qty = quantities[p.id] ?? 0
     if (qty === 0) return null
@@ -232,81 +249,78 @@ export default function QuoteBuilder({
     if (!prereqs || prereqs.length === 0) return null
 
     return (
-      <div style={{
-        marginTop: 6,
-        padding: '6px 10px',
-        background: 'var(--success-bg)',
-        border: '1px solid var(--success)',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: 11,
-        color: 'var(--success)',
-        fontWeight: 500,
-        maxWidth: isMobile ? '100%' : 340,
-      }}>
+      <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--success)', fontWeight: 500, maxWidth: isMobile ? '100%' : 340 }}>
         <span style={{ marginRight: 4 }}>✓</span>
         Auto-included:&nbsp;
         {prereqs.map((pr, i) => {
           const prereqProduct = productsById[pr.prerequisite_product_id]
           const label = pr.note || `${prereqProduct?.description ?? 'Unknown'} ×${pr.quantity}`
-          return (
-            <span key={pr.id}>
-              {i > 0 ? ', ' : ''}
-              <strong>{label}</strong>
-            </span>
-          )
+          return <span key={pr.id}>{i > 0 ? ', ' : ''}<strong>{label}</strong></span>
         })}
       </div>
     )
   }
 
-  // ── Auto-added annotation shown on the prereq product ─────
+  // ── Auto-added badge ───────────────────────────────────────
   const renderAutoAddedNote = (p: Product) => {
     if (!autoAddedProductIds.has(p.id)) return null
     const parents = autoAddedParents[p.id]
     if (!parents || parents.length === 0) return null
 
     return (
-      <div style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 4,
-        padding: '2px 8px',
-        background: 'var(--success-bg)',
-        border: '1px solid var(--success)',
-        borderRadius: 99,
-        fontSize: 10,
-        fontWeight: 600,
-        color: 'var(--success)',
-        whiteSpace: 'nowrap',
-      }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 8px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 99, fontSize: 10, fontWeight: 600, color: 'var(--success)', whiteSpace: 'nowrap' }}>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
         Auto-added via {parents.slice(0, 2).join(', ')}{parents.length > 2 ? ` +${parents.length - 2} more` : ''}
       </div>
     )
   }
 
+  // ── Variant dropdown with combined part number preview ─────
   const renderVariantDropdown = (p: Product, isMobile = false) => {
     const pvs = variantsByProduct[p.id]
     const qty = quantities[p.id] ?? 0
     if (!pvs || pvs.length === 0 || qty === 0) return null
-    const selected = variantSelections[p.id] ?? ''
-    const missing = !selected
+
+    const selectedId = variantSelections[p.id] ?? ''
+    const selectedVariant = selectedId ? variantsById[selectedId] : null
+    const missing = !selectedId
+    const combinedPN = selectedVariant ? getDisplayPartNumber(p, selectedVariant) : null
 
     return (
       <div style={{ marginTop: isMobile ? 8 : 6 }}>
         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: missing ? 'var(--danger)' : 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
           {missing ? '⚠ Select variant' : 'Variant'}
         </label>
-        <select
-          className="input input-sm"
-          style={{ borderColor: missing ? 'var(--danger)' : 'var(--brand)', maxWidth: isMobile ? '100%' : 280 }}
-          value={selected}
-          onChange={(e) => setVariantSelection(p.id, e.target.value)}
-        >
-          <option value="">Select an option…</option>
-          {pvs.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-        </select>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            className="input input-sm"
+            style={{ borderColor: missing ? 'var(--danger)' : 'var(--brand)', maxWidth: isMobile ? '100%' : 240, flex: '1 1 auto' }}
+            value={selectedId}
+            onChange={(e) => setVariantSelection(p.id, e.target.value)}
+          >
+            <option value="">Select an option…</option>
+            {pvs.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+
+          {/* Show combined part number when variant with suffix is selected */}
+          {combinedPN && combinedPN !== p.part_number && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>Part no.</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, background: 'var(--brand-light)', color: 'var(--brand)', padding: '2px 7px', borderRadius: 4, border: '1px solid var(--brand)' }}>
+                {combinedPN}
+              </span>
+            </div>
+          )}
+          {/* If no suffix, just confirm the base part number */}
+          {selectedVariant && !selectedVariant.part_number_suffix && p.part_number && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-3)' }}>Part no.</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)', padding: '2px 7px', background: 'var(--surface-3)', borderRadius: 4 }}>
+                {p.part_number}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
@@ -326,6 +340,7 @@ export default function QuoteBuilder({
           <input className="input" placeholder="MO number" value={quoteForm.mo_number} onChange={(e) => setQuoteForm({ ...quoteForm, mo_number: e.target.value })} style={{ fontFamily: 'var(--mono)' }} />
         </div>
         <input className="input" placeholder="Notes (optional)" value={quoteForm.notes} onChange={(e) => setQuoteForm({ ...quoteForm, notes: e.target.value })} style={{ marginTop: 10 }} />
+
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>Labour</div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -391,13 +406,12 @@ export default function QuoteBuilder({
 
             {isOpen && (
               <>
-                {/* Desktop table */}
                 <div className="card" style={{ marginBottom: 4 }}>
                   <table className="product-table">
                     <thead>
                       <tr>
                         <th>Description</th>
-                        <th style={{ width: 110 }}>Part no.</th>
+                        <th style={{ width: 130 }}>Part no.</th>
                         <th className="right" style={{ width: 90 }}>Unit cost</th>
                         <th className="right" style={{ width: 130 }}>Quantity</th>
                         <th className="right" style={{ width: 90 }}>Total</th>
@@ -408,6 +422,10 @@ export default function QuoteBuilder({
                         const qty = quantities[p.id] ?? 0
                         const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
                         const isAutoAdded = autoAddedProductIds.has(p.id)
+                        const selectedVariantId = variantSelections[p.id]
+                        const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
+                        const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
+
                         return (
                           <tr key={p.id} style={isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
                             <td>
@@ -417,7 +435,15 @@ export default function QuoteBuilder({
                               {renderPrereqNote(p)}
                               {renderVariantDropdown(p)}
                             </td>
-                            <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
+                            <td>
+                              {displayPN ? (
+                                <span className="part-number" style={selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}}>
+                                  {displayPN}
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>
+                              )}
+                            </td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
                             <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div></td>
                             <td className="right" style={{ fontWeight: qty > 0 ? 600 : 400 }}>
@@ -430,18 +456,28 @@ export default function QuoteBuilder({
                   </table>
                 </div>
 
-                {/* Mobile cards */}
                 <div className="product-cards">
                   {items.map((p) => {
                     const qty = quantities[p.id] ?? 0
                     const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
                     const isAutoAdded = autoAddedProductIds.has(p.id)
+                    const selectedVariantId = variantSelections[p.id]
+                    const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
+                    const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
+
                     return (
                       <div key={p.id} className="product-card" style={qty > 0 ? { borderColor: isAutoAdded ? 'var(--success)' : 'var(--brand)', borderWidth: '1.5px' } : {}}>
                         <div className="product-card-header">
                           <div>
                             <div className="product-card-desc">{p.description}</div>
-                            {p.part_number && <span className="part-number" style={{ marginTop: 4, display: 'inline-block' }}>{p.part_number}</span>}
+                            {displayPN && (
+                              <span
+                                className="part-number"
+                                style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}
+                              >
+                                {displayPN}
+                              </span>
+                            )}
                             {renderAutoAddedNote(p)}
                           </div>
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div>
@@ -519,7 +555,6 @@ export default function QuoteBuilder({
         </div>
       </div>
 
-      {/* Save modal */}
       {showSaveModal && (
         <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
