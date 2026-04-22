@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { Product, ProductVariant, Preset, PresetItem, Category, AppSettings } from '../types'
+import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, Category, AppSettings } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
@@ -9,43 +9,37 @@ interface Props {
   presets: Preset[]
   settings: AppSettings
   variants: ProductVariant[]
+  prerequisites: ProductPrerequisite[]
   onRefreshProducts: () => void
   onRefreshPresets: () => void
   onRefreshSettings: () => void
   onRefreshVariants: () => void
+  onRefreshPrerequisites: () => void
   showToast: (msg: string, type?: 'success' | 'error') => void
 }
 
 type AdminTab = 'products' | 'presets' | 'settings'
+type ProductPanel = 'variants' | 'prerequisites' | null
 
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
 const emptyBuffer = (): EditBuffer => ({ description: '', category: 'Outgoing', part_number: '', factory_cost: '', notes: '' })
 
-// ── Variant manager for a single product ─────────────────────
+// ── Variant manager ───────────────────────────────────────────
 function VariantManager({ product, variants, onRefresh, showToast }: {
-  product: Product
-  variants: ProductVariant[]
-  onRefresh: () => void
-  showToast: Props['showToast']
+  product: Product; variants: ProductVariant[]; onRefresh: () => void; showToast: Props['showToast']
 }) {
   const [newLabel, setNewLabel] = useState('')
   const [saving, setSaving] = useState(false)
-
   const productVariants = variants.filter((v) => v.product_id === product.id).sort((a, b) => a.sort_order - b.sort_order)
 
   const addVariant = async () => {
     if (!newLabel.trim()) return
     setSaving(true)
     const maxOrder = Math.max(0, ...productVariants.map((v) => v.sort_order))
-    const { error } = await supabase.from('product_variants').insert({
-      product_id: product.id,
-      label: newLabel.trim(),
-      sort_order: maxOrder + 10,
-    })
+    const { error } = await supabase.from('product_variants').insert({ product_id: product.id, label: newLabel.trim(), sort_order: maxOrder + 10 })
     setSaving(false)
     if (error) { showToast('Failed to add variant', 'error'); return }
-    setNewLabel('')
-    onRefresh()
+    setNewLabel(''); onRefresh()
   }
 
   const removeVariant = async (id: string) => {
@@ -57,59 +51,163 @@ function VariantManager({ product, variants, onRefresh, showToast }: {
   return (
     <div style={{ padding: '12px 14px', background: 'var(--brand-light)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--brand)', marginBottom: 8 }}>
-        Variant options {productVariants.length > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, fontWeight: 700, marginLeft: 4 }}>{productVariants.length}</span>}
+        Variant options
+        {productVariants.length > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{productVariants.length}</span>}
       </div>
-
-      {/* Existing variants */}
       {productVariants.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
           {productVariants.map((v) => (
             <div key={v.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--surface)', border: '1px solid var(--brand)', borderRadius: 99, padding: '3px 10px 3px 12px', fontSize: 12, fontWeight: 500, color: 'var(--brand)' }}>
               {v.label}
-              <button
-                onClick={() => removeVariant(v.id)}
-                style={{ width: 16, height: 16, borderRadius: 99, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, lineHeight: 1, flexShrink: 0 }}
-              >✕</button>
+              <button onClick={() => removeVariant(v.id)} style={{ width: 16, height: 16, borderRadius: 99, border: 'none', background: 'var(--brand)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>✕</button>
             </div>
           ))}
         </div>
       )}
-
-      {/* Add variant */}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          className="input input-sm"
-          placeholder="Add option (e.g. Moss Green)"
-          value={newLabel}
-          onChange={(e) => setNewLabel(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVariant() } }}
-          style={{ flex: 1 }}
-        />
-        <button className="btn btn-sm btn-primary" onClick={addVariant} disabled={saving || !newLabel.trim()}>
+        <input className="input input-sm" placeholder="Add option (e.g. Moss Green)" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVariant() } }} style={{ flex: 1 }} />
+        <button className="btn btn-sm btn-primary" onClick={addVariant} disabled={saving || !newLabel.trim()}>Add</button>
+      </div>
+      {productVariants.length === 0 && <p style={{ fontSize: 11, color: 'var(--brand)', opacity: 0.7, marginTop: 6 }}>No variants yet. Add options reps will choose from (e.g. colour finishes).</p>}
+    </div>
+  )
+}
+
+// ── Prerequisite manager ──────────────────────────────────────
+function PrerequisiteManager({ product, products, prerequisites, onRefresh, showToast }: {
+  product: Product; products: Product[]; prerequisites: ProductPrerequisite[]; onRefresh: () => void; showToast: Props['showToast']
+}) {
+  const [newProductId, setNewProductId] = useState('')
+  const [newQty, setNewQty] = useState('1')
+  const [newNote, setNewNote] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const productPrereqs = prerequisites.filter((p) => p.product_id === product.id)
+  const usedIds = new Set(productPrereqs.map((p) => p.prerequisite_product_id))
+  // Can't add yourself as a prereq
+  const available = products.filter((p) => p.id !== product.id && !usedIds.has(p.id))
+
+  const addPrereq = async () => {
+    if (!newProductId) { showToast('Select a product', 'error'); return }
+    setSaving(true)
+    const maxOrder = Math.max(0, ...productPrereqs.map((p) => p.sort_order))
+    const { error } = await supabase.from('product_prerequisites').insert({
+      product_id: product.id,
+      prerequisite_product_id: newProductId,
+      quantity: parseInt(newQty) || 1,
+      note: newNote.trim() || null,
+      sort_order: maxOrder + 10,
+    })
+    setSaving(false)
+    if (error) { showToast('Failed to add prerequisite', 'error'); return }
+    showToast('Prerequisite added')
+    setNewProductId(''); setNewQty('1'); setNewNote('')
+    onRefresh()
+  }
+
+  const removePrereq = async (id: string) => {
+    const { error } = await supabase.from('product_prerequisites').delete().eq('id', id)
+    if (error) { showToast('Failed to remove prerequisite', 'error'); return }
+    onRefresh()
+  }
+
+  const updatePrereq = async (id: string, field: 'quantity' | 'note', value: string | number) => {
+    const update = field === 'quantity' ? { quantity: Number(value) } : { note: String(value).trim() || null }
+    const { error } = await supabase.from('product_prerequisites').update(update).eq('id', id)
+    if (error) { showToast('Failed to update', 'error'); return }
+    onRefresh()
+  }
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--success)', marginBottom: 8 }}>
+        Prerequisites
+        {productPrereqs.length > 0 && <span style={{ background: 'var(--success)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{productPrereqs.length}</span>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--success)', marginBottom: 10, opacity: 0.8 }}>
+        When a rep adds this product, these items are automatically added to the BOM.
+      </p>
+
+      {productPrereqs.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          {productPrereqs.map((pr) => {
+            const prereqProduct = products.find((p) => p.id === pr.prerequisite_product_id)
+            return (
+              <div key={pr.id} style={{ background: 'var(--surface)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>{prereqProduct?.description ?? 'Unknown'}</div>
+                  {prereqProduct?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{prereqProduct.part_number}</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Qty</label>
+                    <input
+                      type="number" min="1"
+                      style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }}
+                      value={pr.quantity}
+                      onChange={(e) => updatePrereq(pr.id, 'quantity', parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Custom note (optional)</label>
+                    <input
+                      className="input input-sm"
+                      placeholder="e.g. Insulators 35mm M6 ×4"
+                      defaultValue={pr.note ?? ''}
+                      onBlur={(e) => updatePrereq(pr.id, 'note', e.target.value)}
+                      style={{ minWidth: 120 }}
+                    />
+                  </div>
+                  <button className="btn btn-sm btn-danger" style={{ marginTop: 16 }} onClick={() => removePrereq(pr.id)}>Remove</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Add prereq */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: 2, minWidth: 180 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Add prerequisite product</label>
+          <select className="input input-sm" value={newProductId} onChange={(e) => setNewProductId(e.target.value)}>
+            <option value="">Select product…</option>
+            {CATEGORIES.map((cat) => {
+              const cp = available.filter((p) => p.category === cat)
+              if (!cp.length) return null
+              return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup>
+            })}
+          </select>
+        </div>
+        <div style={{ width: 64 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Qty</label>
+          <input className="input input-sm" type="number" min="1" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+        </div>
+        <div style={{ flex: 2, minWidth: 140 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Custom note (optional)</label>
+          <input className="input input-sm" placeholder="e.g. Insulators 35mm M6 ×4" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
+        </div>
+        <button className="btn btn-sm" style={{ background: 'var(--success)', borderColor: 'var(--success)', color: '#fff' }} onClick={addPrereq} disabled={saving || !newProductId}>
           Add
         </button>
       </div>
-      {productVariants.length === 0 && (
-        <p style={{ fontSize: 11, color: 'var(--brand)', opacity: 0.7, marginTop: 6 }}>
-          No variants yet. Add options that sales reps will choose from (e.g. colour finishes).
-        </p>
+      {available.length === 0 && productPrereqs.length > 0 && (
+        <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>All products have been added as prerequisites.</p>
       )}
     </div>
   )
 }
 
 // ── Products tab ─────────────────────────────────────────────
-function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants, showToast }: {
-  products: Product[]
-  variants: ProductVariant[]
-  onRefreshProducts: () => void
-  onRefreshVariants: () => void
+function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, showToast }: {
+  products: Product[]; variants: ProductVariant[]; prerequisites: ProductPrerequisite[]
+  onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void
   showToast: Props['showToast']
 }) {
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBuf, setEditBuf] = useState<EditBuffer>(emptyBuffer())
-  const [showVariantsFor, setShowVariantsFor] = useState<string | null>(null)
+  const [openPanel, setOpenPanel] = useState<{ id: string; panel: ProductPanel } | null>(null)
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [newBuf, setNewBuf] = useState<EditBuffer>(emptyBuffer())
@@ -125,6 +223,12 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
     variants.forEach((v) => { map[v.product_id] = (map[v.product_id] ?? 0) + 1 })
     return map
   }, [variants])
+
+  const prereqCountByProduct = useMemo(() => {
+    const map: Record<string, number> = {}
+    prerequisites.forEach((p) => { map[p.product_id] = (map[p.product_id] ?? 0) + 1 })
+    return map
+  }, [prerequisites])
 
   const startEdit = (p: Product) => {
     setEditingId(p.id)
@@ -168,6 +272,10 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
     showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefreshProducts()
   }
 
+  const togglePanel = (productId: string, panel: ProductPanel) => {
+    setOpenPanel((prev) => prev?.id === productId && prev?.panel === panel ? null : { id: productId, panel })
+  }
+
   const EditRow = ({ buf, onBuf }: { buf: EditBuffer; onBuf: (b: EditBuffer) => void }) => (
     <tr className="editing-row">
       <td style={{ minWidth: 200 }}><input className="input input-sm" value={buf.description} onChange={(e) => onBuf({ ...buf, description: e.target.value })} placeholder="Description *" /></td>
@@ -195,7 +303,7 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
               <th style={{ width: 110 }}>Part no.</th>
               <th style={{ width: 100, textAlign: 'right' }}>Factory cost</th>
               <th style={{ width: 160 }}>Notes</th>
-              <th style={{ width: 160, textAlign: 'right' }}>Actions</th>
+              <th style={{ width: 200, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -215,8 +323,9 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
 
             {filtered.map((p) => {
               const variantCount = variantCountByProduct[p.id] ?? 0
+              const prereqCount = prereqCountByProduct[p.id] ?? 0
               const isEditingThis = editingId === p.id
-              const showingVariants = showVariantsFor === p.id
+              const currentPanel = openPanel?.id === p.id ? openPanel.panel : null
 
               return (
                 <>
@@ -243,8 +352,15 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                           <button
                             className="btn btn-sm"
+                            style={prereqCount > 0 ? { borderColor: 'var(--success)', color: 'var(--success)' } : {}}
+                            onClick={() => togglePanel(p.id, 'prerequisites')}
+                          >
+                            Prereqs{prereqCount > 0 ? ` (${prereqCount})` : ''}
+                          </button>
+                          <button
+                            className="btn btn-sm"
                             style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}}
-                            onClick={() => setShowVariantsFor(showingVariants ? null : p.id)}
+                            onClick={() => togglePanel(p.id, 'variants')}
                           >
                             Variants{variantCount > 0 ? ` (${variantCount})` : ''}
                           </button>
@@ -255,16 +371,18 @@ function ProductsTab({ products, variants, onRefreshProducts, onRefreshVariants,
                     </tr>
                   )}
 
-                  {/* Variants row */}
-                  {showingVariants && !isEditingThis && (
+                  {currentPanel === 'variants' && !isEditingThis && (
                     <tr key={`v-${p.id}`} style={{ background: 'var(--surface-2)' }}>
                       <td colSpan={6} style={{ padding: '4px 12px 12px' }}>
-                        <VariantManager
-                          product={p}
-                          variants={variants}
-                          onRefresh={onRefreshVariants}
-                          showToast={showToast}
-                        />
+                        <VariantManager product={p} variants={variants} onRefresh={onRefreshVariants} showToast={showToast} />
+                      </td>
+                    </tr>
+                  )}
+
+                  {currentPanel === 'prerequisites' && !isEditingThis && (
+                    <tr key={`pr-${p.id}`} style={{ background: 'var(--surface-2)' }}>
+                      <td colSpan={6} style={{ padding: '4px 12px 12px' }}>
+                        <PrerequisiteManager product={p} products={products} prerequisites={prerequisites} onRefresh={onRefreshPrerequisites} showToast={showToast} />
                       </td>
                     </tr>
                   )}
@@ -296,11 +414,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   const createPreset = async () => {
     if (!newName.trim()) { showToast('Preset name is required', 'error'); return }
     setSaving(true)
-    const { data, error } = await supabase.from('presets').insert({
-      name: newName.trim(), description: newDesc.trim() || null,
-      default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null,
-      default_labour_rate_per_min: null,
-    }).select().single()
+    const { data, error } = await supabase.from('presets').insert({ name: newName.trim(), description: newDesc.trim() || null, default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null, default_labour_rate_per_min: null }).select().single()
     setSaving(false)
     if (error || !data) { showToast('Failed to create preset', 'error'); return }
     showToast('Preset created'); setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins(''); setExpanded(data.id); onRefresh()
@@ -313,17 +427,11 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
     showToast('Preset deleted'); if (expanded === id) setExpanded(null); onRefresh()
   }
 
-  const startEditPreset = (preset: Preset) => {
-    setEditingPresetId(preset.id); setEditName(preset.name); setEditDesc(preset.description ?? '')
-    setEditLabourMins(preset.default_labour_minutes != null ? String(preset.default_labour_minutes) : '')
-  }
+  const startEditPreset = (preset: Preset) => { setEditingPresetId(preset.id); setEditName(preset.name); setEditDesc(preset.description ?? ''); setEditLabourMins(preset.default_labour_minutes != null ? String(preset.default_labour_minutes) : '') }
 
   const savePresetMeta = async (id: string) => {
     if (!editName.trim()) { showToast('Name is required', 'error'); return }
-    const { error } = await supabase.from('presets').update({
-      name: editName.trim(), description: editDesc.trim() || null,
-      default_labour_minutes: editLabourMins ? parseFloat(editLabourMins) : null,
-    }).eq('id', id)
+    const { error } = await supabase.from('presets').update({ name: editName.trim(), description: editDesc.trim() || null, default_labour_minutes: editLabourMins ? parseFloat(editLabourMins) : null }).eq('id', id)
     if (error) { showToast('Failed to update preset', 'error'); return }
     showToast('Preset updated'); setEditingPresetId(null); onRefresh()
   }
@@ -369,9 +477,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
         </div>
       )}
 
-      {presets.length === 0 && !creatingNew && (
-        <div className="empty-state"><div className="empty-state-icon">⚡</div><h3>No presets yet</h3><p>Create a preset to let sales reps quickly populate the BOM</p></div>
-      )}
+      {presets.length === 0 && !creatingNew && <div className="empty-state"><div className="empty-state-icon">⚡</div><h3>No presets yet</h3><p>Create a preset to let sales reps quickly populate the BOM</p></div>}
 
       {presets.map((preset) => {
         const isOpen = expanded === preset.id
@@ -406,9 +512,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                       <span className="badge badge-preset">{items.length} items</span>
                     </div>
                     {preset.description && <div className="preset-admin-desc">{preset.description}</div>}
-                    {preset.default_labour_minutes != null && (
-                      <div style={{ fontSize: 12, color: 'var(--brand)', marginTop: 3 }}>Labour default: {preset.default_labour_minutes} minutes</div>
-                    )}
+                    {preset.default_labour_minutes != null && <div style={{ fontSize: 12, color: 'var(--brand)', marginTop: 3 }}>Labour default: {preset.default_labour_minutes} minutes</div>}
                   </>
                 )}
               </div>
@@ -416,8 +520,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                   <button className="btn btn-sm" onClick={() => { startEditPreset(preset); setExpanded(preset.id) }}>Edit</button>
                   <button className="btn btn-sm btn-danger" onClick={() => deletePreset(preset.id)}>Delete</button>
-                  <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none', flexShrink: 0 }}
-                    viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
+                  <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none', flexShrink: 0 }} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
                 </div>
               )}
             </div>
@@ -433,8 +536,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <input type="number" min="1" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
-                          value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
+                        <input type="number" min="1" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }} value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
                         <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Remove</button>
                       </div>
                     </div>
@@ -503,7 +605,6 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
           </div>
         )}
       </div>
-
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Labour rate</h3>
         <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>Cost per minute of labour. Sales reps enter the duration in minutes — this rate is applied automatically. Not visible to sales reps.</p>
@@ -528,7 +629,7 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
 }
 
 // ── Main AdminPanel ───────────────────────────────────────────
-export default function AdminPanel({ products, presets, settings, variants, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, showToast }: Props) {
+export default function AdminPanel({ products, presets, settings, variants, prerequisites, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, onRefreshPrerequisites, showToast }: Props) {
   const [tab, setTab] = useState<AdminTab>('products')
 
   return (
@@ -542,7 +643,7 @@ export default function AdminPanel({ products, presets, settings, variants, onRe
         <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
 
-      {tab === 'products' && <ProductsTab products={products} variants={variants} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} showToast={showToast} />}
+      {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} showToast={showToast} />}
       {tab === 'presets' && <PresetsTab products={products} presets={presets} onRefresh={onRefreshPresets} showToast={showToast} />}
       {tab === 'settings' && <SettingsTab settings={settings} onRefresh={onRefreshSettings} showToast={showToast} />}
     </>
