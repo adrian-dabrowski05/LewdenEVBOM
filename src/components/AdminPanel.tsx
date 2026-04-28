@@ -362,11 +362,39 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
     setOpenPanel((prev) => prev?.id === productId && prev?.panel === panel ? null : { id: productId, panel })
   }
 
+  const exportCSV = () => {
+    const headers = ['Description', 'Category', 'Part Number', 'Factory Cost (£)', 'Notes']
+    const rows = products.map((p) => [
+      p.description,
+      p.category,
+      p.part_number ?? '',
+      p.factory_cost != null ? p.factory_cost.toFixed(2) : '',
+      p.notes ?? '',
+    ])
+    const escape = (val: string) => `"${val.replace(/"/g, '""')}"`
+    const csv = [headers, ...rows].map((row) => row.map(escape).join(',')).join('\r\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lewden-product-catalogue-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <>
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search catalogue…" />
         <div className="toolbar-right">
+          <button className="btn" onClick={exportCSV} title="Export full catalogue as spreadsheet">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export CSV
+          </button>
           <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button>
         </div>
       </div>
