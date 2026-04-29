@@ -1,5 +1,5 @@
 import { useState, useMemo, Fragment } from 'react'
-import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, Category, AppSettings } from '../types'
+import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, PresetConfiguration, Category, AppSettings } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
@@ -532,6 +532,140 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
   )
 }
 
+// ── Configuration manager (inside a preset) ──────────────────
+function ConfigurationManager({ preset, products, onRefresh, showToast }: {
+  preset: Preset; products: Product[]; onRefresh: () => void; showToast: Props['showToast']
+}) {
+  const [newLabel, setNewLabel] = useState('')
+  const [newSuffix, setNewSuffix] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [expandedConfigId, setExpandedConfigId] = useState<string | null>(null)
+  const [addItemProductId, setAddItemProductId] = useState<Record<string, string>>({})
+  const [addItemQty, setAddItemQty] = useState<Record<string, string>>({})
+
+  const configs = (preset.preset_configurations ?? []).sort((a: PresetConfiguration, b: PresetConfiguration) => a.sort_order - b.sort_order)
+
+  const addConfig = async () => {
+    if (!newLabel.trim()) { showToast('Configuration name is required', 'error'); return }
+    setSaving(true)
+    const maxOrder = Math.max(0, ...configs.map((c: PresetConfiguration) => c.sort_order))
+    const { error } = await supabase.from('preset_configurations').insert({ preset_id: preset.id, label: newLabel.trim(), part_number_suffix: newSuffix.trim() || null, sort_order: maxOrder + 10 })
+    setSaving(false)
+    if (error) { showToast('Failed to add configuration', 'error'); return }
+    showToast('Configuration added'); setNewLabel(''); setNewSuffix(''); onRefresh()
+  }
+
+  const removeConfig = async (id: string) => {
+    if (!confirm('Delete this configuration and all its items?')) return
+    const { error } = await supabase.from('preset_configurations').delete().eq('id', id)
+    if (error) { showToast('Failed to delete configuration', 'error'); return }
+    onRefresh()
+  }
+
+  const addConfigItem = async (configId: string) => {
+    const productId = addItemProductId[configId]
+    if (!productId) { showToast('Select a product', 'error'); return }
+    const qty = parseInt(addItemQty[configId] ?? '1') || 1
+    const { error } = await supabase.from('preset_configuration_items').upsert({ configuration_id: configId, product_id: productId, quantity: qty }, { onConflict: 'configuration_id,product_id' })
+    if (error) { showToast('Failed to add item', 'error'); return }
+    showToast('Item added')
+    setAddItemProductId((p) => ({ ...p, [configId]: '' }))
+    setAddItemQty((p) => ({ ...p, [configId]: '1' }))
+    onRefresh()
+  }
+
+  const removeConfigItem = async (itemId: string) => { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh() }
+
+  const updateConfigItemQty = async (itemId: string, qty: number) => {
+    if (qty <= 0) { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh(); return }
+    await supabase.from('preset_configuration_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
+  }
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--secondary-light)', border: '1.5px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--secondary-text)', marginBottom: 8 }}>
+        Configurations
+        {configs.length > 0 && <span style={{ background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{configs.length}</span>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--secondary-text)', opacity: 0.8, marginBottom: 12 }}>
+        Each configuration is a variant of this preset (e.g. Mild Steel + SD, Stainless + MCCB). Preset common items apply to all; configuration items are added on top.
+      </p>
+
+      {configs.map((config: PresetConfiguration) => {
+        const isExpanded = expandedConfigId === config.id
+        const configItems = config.preset_configuration_items ?? []
+        const usedIds = new Set(configItems.map((i: any) => i.product_id))
+        const available = products.filter((p) => !usedIds.has(p.id))
+
+        return (
+          <div key={config.id} style={{ background: 'var(--surface)', border: '1px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginBottom: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', cursor: 'pointer', gap: 10 }} onClick={() => setExpandedConfigId(isExpanded ? null : config.id)}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{config.label}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 2, alignItems: 'center' }}>
+                  {config.part_number_suffix && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--secondary)', color: 'var(--secondary-text)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>suffix: {config.part_number_suffix}</span>}
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{configItems.length} item{configItems.length !== 1 ? 's' : ''}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                <button className="btn btn-sm btn-danger" onClick={() => removeConfig(config.id)}>Delete</button>
+                <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none', flexShrink: 0, alignSelf: 'center' }} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
+              </div>
+            </div>
+
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px' }}>
+                {configItems.map((item: any) => {
+                  const product = products.find((p) => p.id === item.product_id)
+                  return (
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ flex: 1, fontSize: 13 }}>
+                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
+                        {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
+                      </div>
+                      <input type="number" min="1" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={item.quantity} onChange={(e) => updateConfigItemQty(item.id, parseInt(e.target.value) || 0)} />
+                      <button className="btn btn-sm btn-danger" onClick={() => removeConfigItem(item.id)}>Remove</button>
+                    </div>
+                  )
+                })}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+                  <div style={{ flex: 2, minWidth: 180 }}>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Add product</label>
+                    <select className="input input-sm" value={addItemProductId[config.id] ?? ''} onChange={(e) => setAddItemProductId((p) => ({ ...p, [config.id]: e.target.value }))}>
+                      <option value="">Select product…</option>
+                      {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+                    </select>
+                  </div>
+                  <div style={{ width: 64 }}>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Qty</label>
+                    <input className="input input-sm" type="number" min="1" value={addItemQty[config.id] ?? '1'} onChange={(e) => setAddItemQty((p) => ({ ...p, [config.id]: e.target.value }))} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+                  </div>
+                  <button className="btn btn-sm btn-secondary" onClick={() => addConfigItem(config.id)}>Add</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <div style={{ borderTop: configs.length > 0 ? '1px solid rgba(0,0,0,0.08)' : 'none', paddingTop: configs.length > 0 ? 12 : 0, marginTop: configs.length > 0 ? 8 : 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Add configuration</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: 2, minWidth: 160 }}>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Label *</label>
+            <input className="input input-sm" placeholder="e.g. Mild Steel + Switch Disconnector" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 100 }}>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Part no. suffix</label>
+            <input className="input input-sm" style={{ fontFamily: 'var(--mono)' }} placeholder="e.g. ZD" value={newSuffix} onChange={(e) => setNewSuffix(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
+          </div>
+          <button className="btn btn-sm" style={{ background: 'var(--secondary)', borderColor: 'var(--secondary-dark)', color: 'var(--secondary-text)', fontWeight: 600 }} onClick={addConfig} disabled={saving || !newLabel.trim()}>Add</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Presets tab ───────────────────────────────────────────────
 function PresetsTab({ products, presets, onRefresh, showToast }: { products: Product[]; presets: Preset[]; onRefresh: () => void; showToast: Props['showToast'] }) {
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -692,6 +826,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   </div>
                   <button className="btn btn-sm btn-secondary" onClick={() => addItem(preset.id)}>Add item</button>
                 </div>
+                <ConfigurationManager preset={preset} products={products} onRefresh={onRefresh} showToast={showToast} />
               </div>
             )}
           </div>
