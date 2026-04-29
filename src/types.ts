@@ -83,6 +83,23 @@ export interface QuoteItem {
   variant_label: string | null
 }
 
+export interface PresetConfigurationItem {
+  id: string
+  configuration_id: string
+  product_id: string
+  quantity: number
+}
+
+export interface PresetConfiguration {
+  id: string
+  preset_id: string
+  label: string
+  part_number_suffix: string | null
+  sort_order: number
+  created_at: string
+  preset_configuration_items?: PresetConfigurationItem[]
+}
+
 export interface Preset {
   id: string
   name: string
@@ -92,6 +109,7 @@ export interface Preset {
   created_at: string
   updated_at: string
   preset_items?: PresetItem[]
+  preset_configurations?: PresetConfiguration[]
 }
 
 export interface PresetItem {

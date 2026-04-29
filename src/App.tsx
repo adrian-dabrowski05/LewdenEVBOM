@@ -34,7 +34,6 @@ export default function App() {
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
   const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
-  // Tracks auto-added prereq quantities so we can cleanly remove them
   const [autoAdded, setAutoAdded] = useState<AutoAddedMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
 
@@ -68,7 +67,10 @@ export default function App() {
 
   useEffect(() => { loadPresets() }, [])
   const loadPresets = async () => {
-    const { data, error } = await supabase.from('presets').select('*, preset_items(*)').order('created_at')
+    const { data, error } = await supabase
+      .from('presets')
+      .select('*, preset_items(*), preset_configurations(*, preset_configuration_items(*))')
+      .order('created_at')
     if (!error) setPresets(data || [])
   }
 
@@ -88,77 +90,66 @@ export default function App() {
   // ── Smart qty setter with prereq auto-add/remove ───────────
   const setQty = useCallback((productId: string, qty: number, prereqsRef?: ProductPrerequisite[]) => {
     const prereqs = prereqsRef ?? prerequisites
-
     setQuantities((prevQtys) => {
       const prevQty = prevQtys[productId] ?? 0
       const newQtys = { ...prevQtys }
-
       if (qty <= 0) {
         delete newQtys[productId]
-        // Clear variant selection
         setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
       } else {
         newQtys[productId] = qty
       }
-
-      // Find all prereqs for this product
       const productPrereqs = prereqs.filter((p) => p.product_id === productId)
       if (productPrereqs.length === 0) return newQtys
-
-      // Update auto-added tracking and prereq quantities
       setAutoAdded((prevAuto) => {
         const newAuto = { ...prevAuto }
-
         if (qty <= 0 && prevQty > 0) {
-          // Product removed — remove auto-added prereq quantities
           productPrereqs.forEach((prereq) => {
             const autoEntry = newAuto[prereq.prerequisite_product_id]
             if (autoEntry && autoEntry[productId] != null) {
               const wasAutoAdded = autoEntry[productId]
               const newAutoEntry = { ...autoEntry }
               delete newAutoEntry[productId]
-              if (Object.keys(newAutoEntry).length === 0) {
-                delete newAuto[prereq.prerequisite_product_id]
-              } else {
-                newAuto[prereq.prerequisite_product_id] = newAutoEntry
-              }
-              // Reduce prereq qty by what was auto-added
+              if (Object.keys(newAutoEntry).length === 0) delete newAuto[prereq.prerequisite_product_id]
+              else newAuto[prereq.prerequisite_product_id] = newAutoEntry
               const currentPrereqQty = newQtys[prereq.prerequisite_product_id] ?? 0
               const reduced = currentPrereqQty - wasAutoAdded
-              if (reduced <= 0) {
-                delete newQtys[prereq.prerequisite_product_id]
-              } else {
-                newQtys[prereq.prerequisite_product_id] = reduced
-              }
+              if (reduced <= 0) delete newQtys[prereq.prerequisite_product_id]
+              else newQtys[prereq.prerequisite_product_id] = reduced
             }
           })
         } else if (qty > 0 && prevQty <= 0) {
-          // Product newly added — auto-add prereq quantities
           productPrereqs.forEach((prereq) => {
             const addQty = prereq.quantity
             newQtys[prereq.prerequisite_product_id] = (newQtys[prereq.prerequisite_product_id] ?? 0) + addQty
-            // Track what we auto-added
-            if (!newAuto[prereq.prerequisite_product_id]) {
-              newAuto[prereq.prerequisite_product_id] = {}
-            }
+            if (!newAuto[prereq.prerequisite_product_id]) newAuto[prereq.prerequisite_product_id] = {}
             newAuto[prereq.prerequisite_product_id][productId] = addQty
           })
         }
-
         return newAuto
       })
-
       return newQtys
     })
   }, [prerequisites])
 
-  // ── Apply preset ───────────────────────────────────────────
-  const applyPreset = useCallback((preset: Preset) => {
-    if (!preset.preset_items?.length) return
-    // Apply preset items using smart setQty for each
-    preset.preset_items.forEach((item) => {
+  // ── Apply preset (with optional configuration) ─────────────
+  const applyPreset = useCallback((preset: Preset, configurationId?: string) => {
+    // Apply common items
+    const commonItems = preset.preset_items ?? []
+    commonItems.forEach((item) => {
       setQty(item.product_id, item.quantity, prerequisites)
     })
+
+    // Apply configuration-specific items if a config was selected
+    if (configurationId) {
+      const config = preset.preset_configurations?.find((c) => c.id === configurationId)
+      if (config?.preset_configuration_items) {
+        config.preset_configuration_items.forEach((item) => {
+          setQty(item.product_id, item.quantity, prerequisites)
+        })
+      }
+    }
+
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
@@ -264,13 +255,11 @@ export default function App() {
   return (
     <>
       <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} />
-
       <main className="main">
         {view === 'builder' && (
           <QuoteBuilder
             products={products} loading={productsLoading}
-            variants={variants} prerequisites={prerequisites}
-            autoAdded={autoAdded}
+            variants={variants} prerequisites={prerequisites} autoAdded={autoAdded}
             quantities={quantities} setQty={setQty}
             variantSelections={variantSelections} setVariantSelection={setVariantSelection}
             quoteForm={quoteForm} setQuoteForm={setQuoteForm}
@@ -293,7 +282,6 @@ export default function App() {
           />
         )}
       </main>
-
       <BottomNav view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} activeCount={activeCount} />
       {showAdminLogin && <AdminLogin onClose={() => setShowAdminLogin(false)} showToast={showToast} />}
       {toast && <Toast message={toast.message} type={toast.type} />}
