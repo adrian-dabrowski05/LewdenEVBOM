@@ -119,7 +119,7 @@ export interface PresetItem {
   quantity: number
 }
 
-export type View = 'builder' | 'quotes' | 'admin'
+export type View = 'builder' | 'quotes' | 'admin' | 'requests'
 
 export interface QuantityMap {
   [productId: string]: number

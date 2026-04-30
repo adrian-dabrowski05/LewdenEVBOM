@@ -11,6 +11,7 @@ import SavedQuotes from './components/SavedQuotes'
 import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
 import Toast from './components/Toast'
+import PartRequests from './components/PartRequests'
 
 export interface ToastState { message: string; type: 'success' | 'error' }
 
@@ -280,6 +281,9 @@ export default function App() {
             onRefreshPrerequisites={loadPrerequisites}
             showToast={showToast}
           />
+        )}
+        {view === 'requests' && (
+          <PartRequests isAdmin={isAdmin} showToast={showToast} />
         )}
       </main>
       <BottomNav view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} activeCount={activeCount} />
