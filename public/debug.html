@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lewden BOM — Connection Diagnostics</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #0f1117; color: #e0e0e0; }
+    h1 { color: #004A9A; font-size: 18px; }
+    .test { margin: 10px 0; padding: 10px 14px; border-radius: 6px; background: #1a1a2e; border-left: 4px solid #444; }
+    .test.pass { border-color: #059669; }
+    .test.fail { border-color: #dc2626; }
+    .test.pending { border-color: #d97706; }
+    .label { font-weight: bold; font-size: 13px; }
+    .detail { font-size: 11px; color: #9ca3b0; margin-top: 4px; word-break: break-all; }
+    .status { float: right; font-size: 12px; }
+    button { background: #004A9A; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-bottom: 20px; }
+    button:hover { background: #003578; }
+    #log { margin-top: 20px; padding: 14px; background: #1a1a2e; border-radius: 6px; font-size: 11px; white-space: pre-wrap; color: #9ca3b0; max-height: 300px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>🔧 Lewden BOM — Connection Diagnostics</h1>
+  <p style="font-size:12px;color:#9ca3b0;margin-bottom:16px">Opens your Supabase project URL: <span id="url-display" style="color:#FFCC00"></span></p>
+  <button onclick="runTests()">Run diagnostics</button>
+  <div id="results"></div>
+  <div id="log"></div>
+
+  <script>
+    // ── Paste your Supabase URL here ──────────────────────────
+    const SUPABASE_URL = 'https://vjieeetiojvmedwxqagq.supabase.co'
+    const SUPABASE_KEY = document.currentScript?.dataset?.key || ''
+    // ─────────────────────────────────────────────────────────
+
+    document.getElementById('url-display').textContent = SUPABASE_URL
+
+    const log = []
+    function addLog(msg) {
+      log.push(`[${new Date().toISOString()}] ${msg}`)
+      document.getElementById('log').textContent = log.join('\n')
+    }
+
+    function setTest(id, status, detail) {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.className = `test ${status}`
+      el.querySelector('.status').textContent = status === 'pass' ? '✅ Pass' : status === 'fail' ? '❌ Fail' : '⏳ Testing…'
+      if (detail) el.querySelector('.detail').textContent = detail
+    }
+
+    function createTest(id, label, detail = '') {
+      const div = document.createElement('div')
+      div.className = 'test pending'
+      div.id = id
+      div.innerHTML = `<span class="label">${label}</span><span class="status">⏳ Waiting…</span><div class="detail">${detail}</div>`
+      document.getElementById('results').appendChild(div)
+    }
+
+    async function runTests() {
+      document.getElementById('results').innerHTML = ''
+      log.length = 0
+
+      createTest('t1', '1. DNS resolution — can the browser resolve supabase.co?', SUPABASE_URL)
+      createTest('t2', '2. Basic HTTP fetch — can we reach the Supabase root?', `GET ${SUPABASE_URL}`)
+      createTest('t3', '3. REST API — can we reach the PostgREST endpoint?', `GET ${SUPABASE_URL}/rest/v1/`)
+      createTest('t4', '4. SSL certificate — is the cert valid?', 'Checking TLS handshake')
+      createTest('t5', '5. CORS — are cross-origin requests allowed?', 'Checking response headers')
+      createTest('t6', '6. Products table — can we query the database?', `GET ${SUPABASE_URL}/rest/v1/products?limit=1`)
+      createTest('t7', '7. Anon key — is it present in this build?', 'Checking environment variable')
+
+      // Test 1+2+4+5 — basic fetch to root
+      try {
+        addLog(`Fetching ${SUPABASE_URL}...`)
+        setTest('t1', 'pending', 'Resolving...')
+        const t = Date.now()
+        const res = await fetch(SUPABASE_URL, { mode: 'cors' })
+        const ms = Date.now() - t
+        addLog(`Root fetch: ${res.status} in ${ms}ms`)
+        setTest('t1', 'pass', `Resolved in ${ms}ms`)
+        setTest('t2', 'pass', `HTTP ${res.status} — reachable`)
+        setTest('t4', 'pass', `SSL valid — TLS handshake succeeded`)
+        const cors = res.headers.get('access-control-allow-origin')
+        setTest('t5', cors ? 'pass' : 'fail', cors ? `CORS header: ${cors}` : 'No CORS header — requests may be blocked')
+      } catch (err) {
+        addLog(`Root fetch error: ${err.message}`)
+        const msg = err.message || String(err)
+        setTest('t1', msg.includes('net::ERR_NAME_NOT_RESOLVED') ? 'fail' : 'pass', msg.includes('ERR_NAME') ? 'DNS failed — cannot resolve supabase.co' : 'DNS resolved (fetch failed at a later stage)')
+        setTest('t2', 'fail', msg)
+        setTest('t4', msg.includes('CERT') || msg.includes('SSL') || msg.includes('ERR_CERT') ? 'fail' : 'pending',
+          msg.includes('CERT') || msg.includes('SSL') || msg.includes('ERR_CERT') ? `SSL error: ${msg}` : 'Could not determine — fetch failed before TLS check')
+        setTest('t5', 'fail', `Fetch failed before headers could be read: ${msg}`)
+      }
+
+      // Test 3 — REST endpoint
+      try {
+        addLog(`Fetching REST endpoint...`)
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/`, { mode: 'cors', headers: { 'Accept': 'application/json' } })
+        addLog(`REST endpoint: ${res.status}`)
+        setTest('t3', res.status === 200 || res.status === 401 ? 'pass' : 'fail',
+          `HTTP ${res.status} — ${res.status === 401 ? 'auth required (expected)' : res.status === 200 ? 'endpoint reachable' : 'unexpected status'}`)
+      } catch (err) {
+        addLog(`REST fetch error: ${err.message}`)
+        setTest('t3', 'fail', err.message)
+      }
+
+      // Test 6 — products table with anon key from meta tag
+      const anonKey = document.querySelector('meta[name="sb-key"]')?.content
+      try {
+        addLog(`Querying products table...`)
+        const headers = { 'apikey': anonKey || 'MISSING', 'Authorization': `Bearer ${anonKey || 'MISSING'}` }
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, { mode: 'cors', headers })
+        const body = await res.text()
+        addLog(`Products query: ${res.status} — ${body.slice(0, 100)}`)
+        setTest('t6', res.status === 200 ? 'pass' : 'fail',
+          `HTTP ${res.status}${res.status === 200 ? ' — products table accessible' : ` — ${body.slice(0, 120)}`}`)
+      } catch (err) {
+        addLog(`Products query error: ${err.message}`)
+        setTest('t6', 'fail', err.message)
+      }
+
+      // Test 7 — anon key presence
+      if (anonKey) {
+        setTest('t7', 'pass', `Key present: ${anonKey.slice(0, 20)}…`)
+      } else {
+        setTest('t7', 'fail', 'No anon key found — add a <meta name="sb-key" content="YOUR_KEY"> tag to this file to test')
+      }
+
+      addLog('Tests complete.')
+    }
+  </script>
+</body>
+</html>
