@@ -244,7 +244,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Qty</label>
-                    <input type="number" min="1" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={pr.quantity} onChange={(e) => updatePrereq(pr.id, 'quantity', parseInt(e.target.value) || 1)} />
+                    <input type="number" min="0.01" step="any" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={pr.quantity} onChange={(e) => updatePrereq(pr.id, 'quantity', parseInt(e.target.value) || 1)} />
                   </div>
                   <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Custom note (optional)</label>
@@ -268,7 +268,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
         </div>
         <div style={{ width: 64 }}>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Qty</label>
-          <input className="input input-sm" type="number" min="1" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+          <input className="input input-sm" type="number" min="0.01" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
         </div>
         <div style={{ flex: 2, minWidth: 140 }}>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Custom note (optional)</label>
@@ -623,7 +623,7 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
                         <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
-                      <input type="number" min="1" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={item.quantity} onChange={(e) => updateConfigItemQty(item.id, parseInt(e.target.value) || 0)} />
+                      <input type="number" min="0.01" step="any" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={item.quantity} onChange={(e) => updateConfigItemQty(item.id, parseInt(e.target.value) || 0)} />
                       <button className="btn btn-sm btn-danger" onClick={() => removeConfigItem(item.id)}>Remove</button>
                     </div>
                   )
@@ -638,7 +638,7 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
                   </div>
                   <div style={{ width: 64 }}>
                     <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Qty</label>
-                    <input className="input input-sm" type="number" min="1" value={addItemQty[config.id] ?? '1'} onChange={(e) => setAddItemQty((p) => ({ ...p, [config.id]: e.target.value }))} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+                    <input className="input input-sm" type="number" min="0.01" step="any" value={addItemQty[config.id] ?? '1'} onChange={(e) => setAddItemQty((p) => ({ ...p, [config.id]: e.target.value }))} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
                   </div>
                   <button className="btn btn-sm btn-secondary" onClick={() => addConfigItem(config.id)}>Add</button>
                 </div>
@@ -806,7 +806,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <input type="number" min="1" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }} value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
+                        <input type="number" min="0.01" step="any" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }} value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
                         <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Remove</button>
                       </div>
                     </div>
@@ -822,7 +822,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   </div>
                   <div style={{ width: 80 }}>
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Qty</label>
-                    <input className="input input-sm" type="number" min="1" value={addItemQty} onChange={(e) => setAddItemQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+                    <input className="input input-sm" type="number" min="0.01" step="any" value={addItemQty} onChange={(e) => setAddItemQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
                   </div>
                   <button className="btn btn-sm btn-secondary" onClick={() => addItem(preset.id)}>Add item</button>
                 </div>
