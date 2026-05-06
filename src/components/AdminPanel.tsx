@@ -24,32 +24,17 @@ type ProductPanel = 'variants' | 'prerequisites' | null
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
 const emptyBuffer = (): EditBuffer => ({ description: '', category: 'Outgoing', part_number: '', factory_cost: '', notes: '' })
 
-// ── EditRow defined OUTSIDE all components so React never remounts it ──
-interface EditRowProps {
-  buf: EditBuffer
-  onBuf: (b: EditBuffer) => void
-}
+// ── EditRow defined OUTSIDE all components — prevents remount on keystroke ──
+interface EditRowProps { buf: EditBuffer; onBuf: (b: EditBuffer) => void }
 function EditRow({ buf, onBuf }: EditRowProps) {
   return (
     <tr className="editing-row">
       <td></td>
-      <td style={{ minWidth: 200 }}>
-        <input className="input input-sm" value={buf.description} onChange={(e) => onBuf({ ...buf, description: e.target.value })} placeholder="Description *" />
-      </td>
-      <td>
-        <select className="input input-sm" value={buf.category} onChange={(e) => onBuf({ ...buf, category: e.target.value as Category })}>
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </td>
-      <td>
-        <input className="input input-sm" style={{ fontFamily: 'var(--mono)', fontSize: 12 }} value={buf.part_number} onChange={(e) => onBuf({ ...buf, part_number: e.target.value })} placeholder="LCR1234" />
-      </td>
-      <td>
-        <input className="input input-sm" type="number" step="0.01" min="0" style={{ textAlign: 'right' }} value={buf.factory_cost} onChange={(e) => onBuf({ ...buf, factory_cost: e.target.value })} placeholder="0.00" />
-      </td>
-      <td>
-        <input className="input input-sm" value={buf.notes} onChange={(e) => onBuf({ ...buf, notes: e.target.value })} placeholder="Optional note" />
-      </td>
+      <td style={{ minWidth: 200 }}><input className="input input-sm" value={buf.description} onChange={(e) => onBuf({ ...buf, description: e.target.value })} placeholder="Description *" /></td>
+      <td><select className="input input-sm" value={buf.category} onChange={(e) => onBuf({ ...buf, category: e.target.value as Category })}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></td>
+      <td><input className="input input-sm" style={{ fontFamily: 'var(--mono)', fontSize: 12 }} value={buf.part_number} onChange={(e) => onBuf({ ...buf, part_number: e.target.value })} placeholder="LCR1234" /></td>
+      <td><input className="input input-sm" type="number" step="0.01" min="0" style={{ textAlign: 'right' }} value={buf.factory_cost} onChange={(e) => onBuf({ ...buf, factory_cost: e.target.value })} placeholder="0.00" /></td>
+      <td><input className="input input-sm" value={buf.notes} onChange={(e) => onBuf({ ...buf, notes: e.target.value })} placeholder="Optional note" /></td>
     </tr>
   )
 }
@@ -103,11 +88,9 @@ function VariantManager({ product, variants, onRefresh, showToast }: {
         Variant options
         {productVariants.length > 0 && <span style={{ background: 'var(--brand)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{productVariants.length}</span>}
       </div>
-      {product.part_number ? (
-        <div style={{ fontSize: 11, color: 'var(--brand)', opacity: 0.75, marginBottom: 10 }}>Base part number: <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{product.part_number}</span> — suffix will be appended</div>
-      ) : (
-        <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 10 }}>No base part number — suffix will be used as the full variant part number.</div>
-      )}
+      {product.part_number
+        ? <div style={{ fontSize: 11, color: 'var(--brand)', opacity: 0.75, marginBottom: 10 }}>Base part number: <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{product.part_number}</span> — suffix will be appended</div>
+        : <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 10 }}>No base part number — suffix will be used as the full variant part number.</div>}
 
       {productVariants.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
@@ -141,14 +124,9 @@ function VariantManager({ product, variants, onRefresh, showToast }: {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand)' }}>{v.label}</div>
-                      {combined ? (
-                        <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '1px 6px', borderRadius: 4 }}>{combined}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>({product.part_number} + {v.part_number_suffix})</span>
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>No part number suffix</div>
-                      )}
+                      {combined
+                        ? <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '1px 6px', borderRadius: 4 }}>{combined}</span><span style={{ fontSize: 10, color: 'var(--text-3)' }}>({product.part_number} + {v.part_number_suffix})</span></div>
+                        : <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>No part number suffix</div>}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       <button className="btn btn-sm" onClick={() => startEditVariant(v)}>Edit</button>
@@ -204,7 +182,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
     if (!newProductId) { showToast('Select a product', 'error'); return }
     setSaving(true)
     const maxOrder = Math.max(0, ...productPrereqs.map((p) => p.sort_order))
-    const { error } = await supabase.from('product_prerequisites').insert({ product_id: product.id, prerequisite_product_id: newProductId, quantity: parseInt(newQty) || 1, note: newNote.trim() || null, sort_order: maxOrder + 10 })
+    const { error } = await supabase.from('product_prerequisites').insert({ product_id: product.id, prerequisite_product_id: newProductId, quantity: parseFloat(newQty) || 1, note: newNote.trim() || null, sort_order: maxOrder + 10 })
     setSaving(false)
     if (error) { showToast('Failed to add prerequisite', 'error'); return }
     showToast('Prerequisite added'); setNewProductId(''); setNewQty('1'); setNewNote(''); onRefresh()
@@ -244,7 +222,9 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Qty</label>
-                    <input type="number" min="0.01" step="any" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={pr.quantity} onChange={(e) => updatePrereq(pr.id, 'quantity', parseInt(e.target.value) || 1)} />
+                    <input type="number" min="0.01" step="0.5"
+                      style={{ width: 64, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }}
+                      value={pr.quantity} onChange={(e) => updatePrereq(pr.id, 'quantity', parseFloat(e.target.value) || 1)} />
                   </div>
                   <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={{ display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Custom note (optional)</label>
@@ -266,9 +246,9 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
             {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
           </select>
         </div>
-        <div style={{ width: 64 }}>
+        <div style={{ width: 72 }}>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Qty</label>
-          <input className="input input-sm" type="number" min="0.01" step="any" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+          <input className="input input-sm" type="number" min="0.01" step="0.5" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
         </div>
         <div style={{ flex: 2, minWidth: 140 }}>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Custom note (optional)</label>
@@ -280,7 +260,143 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
   )
 }
 
-// ── Products tab ─────────────────────────────────────────────
+// ── Configuration manager ─────────────────────────────────────
+function ConfigurationManager({ preset, products, onRefresh, showToast }: {
+  preset: Preset; products: Product[]; onRefresh: () => void; showToast: Props['showToast']
+}) {
+  const [newLabel, setNewLabel] = useState('')
+  const [newSuffix, setNewSuffix] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [expandedConfigId, setExpandedConfigId] = useState<string | null>(null)
+  const [addItemProductId, setAddItemProductId] = useState<Record<string, string>>({})
+  const [addItemQty, setAddItemQty] = useState<Record<string, string>>({})
+
+  const configs = (preset.preset_configurations ?? []).sort((a: PresetConfiguration, b: PresetConfiguration) => a.sort_order - b.sort_order)
+
+  const addConfig = async () => {
+    if (!newLabel.trim()) { showToast('Configuration name is required', 'error'); return }
+    setSaving(true)
+    const maxOrder = Math.max(0, ...configs.map((c: PresetConfiguration) => c.sort_order))
+    const { error } = await supabase.from('preset_configurations').insert({ preset_id: preset.id, label: newLabel.trim(), part_number_suffix: newSuffix.trim() || null, sort_order: maxOrder + 10 })
+    setSaving(false)
+    if (error) { showToast('Failed to add configuration', 'error'); return }
+    showToast('Configuration added'); setNewLabel(''); setNewSuffix(''); onRefresh()
+  }
+
+  const removeConfig = async (id: string) => {
+    if (!confirm('Delete this configuration and all its items?')) return
+    const { error } = await supabase.from('preset_configurations').delete().eq('id', id)
+    if (error) { showToast('Failed to delete configuration', 'error'); return }
+    onRefresh()
+  }
+
+  const addConfigItem = async (configId: string) => {
+    const productId = addItemProductId[configId]
+    if (!productId) { showToast('Select a product', 'error'); return }
+    const qty = parseFloat(addItemQty[configId] ?? '1') || 1
+    const { error } = await supabase.from('preset_configuration_items').upsert({ configuration_id: configId, product_id: productId, quantity: qty }, { onConflict: 'configuration_id,product_id' })
+    if (error) { showToast('Failed to add item', 'error'); return }
+    showToast('Item added')
+    setAddItemProductId((p) => ({ ...p, [configId]: '' }))
+    setAddItemQty((p) => ({ ...p, [configId]: '1' }))
+    onRefresh()
+  }
+
+  const removeConfigItem = async (itemId: string) => { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh() }
+
+  const updateConfigItemQty = async (itemId: string, qty: number) => {
+    if (qty <= 0) { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh(); return }
+    await supabase.from('preset_configuration_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
+  }
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--secondary-light)', border: '1.5px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--secondary-text)', marginBottom: 8 }}>
+        Configurations
+        {configs.length > 0 && <span style={{ background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{configs.length}</span>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--secondary-text)', opacity: 0.8, marginBottom: 12 }}>
+        Each configuration is a variant of this preset (e.g. Mild Steel + SD, Stainless + MCCB). Preset common items apply to all.
+      </p>
+
+      {configs.map((config: PresetConfiguration) => {
+        const isExpanded = expandedConfigId === config.id
+        const configItems = config.preset_configuration_items ?? []
+        const usedIds = new Set(configItems.map((i: any) => i.product_id))
+        const available = products.filter((p) => !usedIds.has(p.id))
+
+        return (
+          <div key={config.id} style={{ background: 'var(--surface)', border: '1px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginBottom: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', cursor: 'pointer', gap: 10 }} onClick={() => setExpandedConfigId(isExpanded ? null : config.id)}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{config.label}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 2, alignItems: 'center' }}>
+                  {config.part_number_suffix && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--secondary)', color: 'var(--secondary-text)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>suffix: {config.part_number_suffix}</span>}
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{configItems.length} item{configItems.length !== 1 ? 's' : ''}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                <button className="btn btn-sm btn-danger" onClick={() => removeConfig(config.id)}>Delete</button>
+                <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none', flexShrink: 0, alignSelf: 'center' }} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
+              </div>
+            </div>
+
+            {isExpanded && (
+              <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px' }}>
+                {configItems.map((item: any) => {
+                  const product = products.find((p) => p.id === item.product_id)
+                  return (
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ flex: 1, fontSize: 13 }}>
+                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
+                        {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
+                      </div>
+                      <input type="number" min="0.01" step="0.5"
+                        style={{ width: 72, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }}
+                        value={item.quantity} onChange={(e) => updateConfigItemQty(item.id, parseFloat(e.target.value) || 0)} />
+                      <button className="btn btn-sm btn-danger" onClick={() => removeConfigItem(item.id)}>Remove</button>
+                    </div>
+                  )
+                })}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+                  <div style={{ flex: 2, minWidth: 180 }}>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Add product</label>
+                    <select className="input input-sm" value={addItemProductId[config.id] ?? ''} onChange={(e) => setAddItemProductId((p) => ({ ...p, [config.id]: e.target.value }))}>
+                      <option value="">Select product…</option>
+                      {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+                    </select>
+                  </div>
+                  <div style={{ width: 72 }}>
+                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Qty</label>
+                    <input className="input input-sm" type="number" min="0.01" step="0.5" value={addItemQty[config.id] ?? '1'} onChange={(e) => setAddItemQty((p) => ({ ...p, [config.id]: e.target.value }))} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+                  </div>
+                  <button className="btn btn-sm btn-secondary" onClick={() => addConfigItem(config.id)}>Add</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <div style={{ borderTop: configs.length > 0 ? '1px solid rgba(0,0,0,0.08)' : 'none', paddingTop: configs.length > 0 ? 12 : 0, marginTop: configs.length > 0 ? 8 : 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Add configuration</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: 2, minWidth: 160 }}>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Label *</label>
+            <input className="input input-sm" placeholder="e.g. Mild Steel + Switch Disconnector" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 100 }}>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Part no. suffix</label>
+            <input className="input input-sm" style={{ fontFamily: 'var(--mono)' }} placeholder="e.g. ZD" value={newSuffix} onChange={(e) => setNewSuffix(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
+          </div>
+          <button className="btn btn-sm" style={{ background: 'var(--secondary)', borderColor: 'var(--secondary-dark)', color: 'var(--secondary-text)', fontWeight: 600 }} onClick={addConfig} disabled={saving || !newLabel.trim()}>Add</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Products tab ──────────────────────────────────────────────
 function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, showToast }: {
   products: Product[]; variants: ProductVariant[]; prerequisites: ProductPrerequisite[]
   onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void
@@ -316,21 +432,11 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
   const allFilteredReviewed = filtered.length > 0 && filtered.every((p) => reviewed.has(p.id))
   const reviewedCount = filtered.filter((p) => reviewed.has(p.id)).length
 
-  const toggleReviewed = (id: string) => {
-    setReviewed((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
+  const toggleReviewed = (id: string) => setReviewed((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
   const selectAll = () => setReviewed((prev) => new Set([...prev, ...filtered.map((p) => p.id)]))
   const deselectAll = () => setReviewed((prev) => { const next = new Set(prev); filtered.forEach((p) => next.delete(p.id)); return next })
 
-  const startEdit = (p: Product) => {
-    setEditingId(p.id)
-    setEditBuf({ description: p.description, category: p.category, part_number: p.part_number ?? '', factory_cost: p.factory_cost != null ? String(p.factory_cost) : '', notes: p.notes ?? '' })
-  }
+  const startEdit = (p: Product) => { setEditingId(p.id); setEditBuf({ description: p.description, category: p.category, part_number: p.part_number ?? '', factory_cost: p.factory_cost != null ? String(p.factory_cost) : '', notes: p.notes ?? '' }) }
 
   const saveEdit = async () => {
     if (!editingId || !editBuf.description.trim()) { showToast('Description is required', 'error'); return }
@@ -358,27 +464,17 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
     showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefreshProducts()
   }
 
-  const togglePanel = (productId: string, panel: ProductPanel) => {
-    setOpenPanel((prev) => prev?.id === productId && prev?.panel === panel ? null : { id: productId, panel })
-  }
+  const togglePanel = (productId: string, panel: ProductPanel) => setOpenPanel((prev) => prev?.id === productId && prev?.panel === panel ? null : { id: productId, panel })
 
   const exportCSV = () => {
     const headers = ['Description', 'Category', 'Part Number', 'Factory Cost (£)', 'Notes']
-    const rows = products.map((p) => [
-      p.description,
-      p.category,
-      p.part_number ?? '',
-      p.factory_cost != null ? p.factory_cost.toFixed(2) : '',
-      p.notes ?? '',
-    ])
+    const rows = products.map((p) => [p.description, p.category, p.part_number ?? '', p.factory_cost != null ? p.factory_cost.toFixed(2) : '', p.notes ?? ''])
     const escape = (val: string) => `"${val.replace(/"/g, '""')}"`
     const csv = [headers, ...rows].map((row) => row.map(escape).join(',')).join('\r\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = `lewden-product-catalogue-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
+    a.href = url; a.download = `lewden-product-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -387,42 +483,24 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search catalogue…" />
         <div className="toolbar-right">
-          <button className="btn" onClick={exportCSV} title="Export full catalogue as spreadsheet">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
+          <button className="btn" onClick={exportCSV}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
             Export CSV
           </button>
           <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button>
         </div>
       </div>
 
-      {/* Checklist toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
-          {filtered.length} product{filtered.length !== 1 ? 's' : ''}
-          {search && ` matching "${search}"`}
-          {reviewedCount > 0 && (
-            <span style={{ marginLeft: 8, background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 99, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>
-              {reviewedCount} reviewed
-            </span>
-          )}
+          {filtered.length} product{filtered.length !== 1 ? 's' : ''}{search && ` matching "${search}"`}
+          {reviewedCount > 0 && <span style={{ marginLeft: 8, background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success)', borderRadius: 99, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>{reviewedCount} reviewed</span>}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            className="btn btn-sm"
-            style={{ fontSize: 12, color: 'var(--success)', borderColor: 'var(--success)' }}
-            onClick={allFilteredReviewed ? deselectAll : selectAll}
-          >
+          <button className="btn btn-sm" style={{ fontSize: 12, color: 'var(--success)', borderColor: 'var(--success)' }} onClick={allFilteredReviewed ? deselectAll : selectAll}>
             {allFilteredReviewed ? 'Deselect all' : 'Select all'}
           </button>
-          {reviewedCount > 0 && !allFilteredReviewed && (
-            <button className="btn btn-sm" onClick={deselectAll} style={{ fontSize: 12 }}>
-              Clear reviewed
-            </button>
-          )}
+          {reviewedCount > 0 && !allFilteredReviewed && <button className="btn btn-sm" onClick={deselectAll} style={{ fontSize: 12 }}>Clear reviewed</button>}
         </div>
       </div>
 
@@ -477,15 +555,8 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                     </>
                   ) : (
                     <tr style={isReviewed ? { opacity: 0.38, background: 'var(--surface-3)' } : {}}>
-                      {/* Checkbox */}
                       <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                        <input
-                          type="checkbox"
-                          checked={isReviewed}
-                          onChange={() => toggleReviewed(p.id)}
-                          title="Mark as reviewed"
-                          style={{ width: 15, height: 15, accentColor: 'var(--success)', cursor: 'pointer' }}
-                        />
+                        <input type="checkbox" checked={isReviewed} onChange={() => toggleReviewed(p.id)} style={{ width: 15, height: 15, accentColor: 'var(--success)', cursor: 'pointer' }} />
                       </td>
                       <td style={isReviewed ? { textDecoration: 'line-through', color: 'var(--text-3)' } : {}}>{p.description}</td>
                       <td><span style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{p.category}</span></td>
@@ -494,33 +565,23 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                       <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{p.notes || '—'}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                          <button className="btn btn-sm" style={prereqCount > 0 ? { borderColor: 'var(--success)', color: 'var(--success)' } : {}} onClick={() => togglePanel(p.id, 'prerequisites')}>
-                            Prereqs{prereqCount > 0 ? ` (${prereqCount})` : ''}
-                          </button>
-                          <button className="btn btn-sm" style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}} onClick={() => togglePanel(p.id, 'variants')}>
-                            Variants{variantCount > 0 ? ` (${variantCount})` : ''}
-                          </button>
+                          <button className="btn btn-sm" style={prereqCount > 0 ? { borderColor: 'var(--success)', color: 'var(--success)' } : {}} onClick={() => togglePanel(p.id, 'prerequisites')}>Prereqs{prereqCount > 0 ? ` (${prereqCount})` : ''}</button>
+                          <button className="btn btn-sm" style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}} onClick={() => togglePanel(p.id, 'variants')}>Variants{variantCount > 0 ? ` (${variantCount})` : ''}</button>
                           <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
                           <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
                         </div>
                       </td>
                     </tr>
                   )}
-
                   {currentPanel === 'variants' && !isEditingThis && (
-                    <tr style={{ background: 'var(--surface-2)' }}>
-                      <td colSpan={7} style={{ padding: '4px 12px 12px' }}>
-                        <VariantManager product={p} variants={variants} onRefresh={onRefreshVariants} showToast={showToast} />
-                      </td>
-                    </tr>
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <VariantManager product={p} variants={variants} onRefresh={onRefreshVariants} showToast={showToast} />
+                    </td></tr>
                   )}
-
                   {currentPanel === 'prerequisites' && !isEditingThis && (
-                    <tr style={{ background: 'var(--surface-2)' }}>
-                      <td colSpan={7} style={{ padding: '4px 12px 12px' }}>
-                        <PrerequisiteManager product={p} products={products} prerequisites={prerequisites} onRefresh={onRefreshPrerequisites} showToast={showToast} />
-                      </td>
-                    </tr>
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <PrerequisiteManager product={p} products={products} prerequisites={prerequisites} onRefresh={onRefreshPrerequisites} showToast={showToast} />
+                    </td></tr>
                   )}
                 </Fragment>
               )
@@ -529,140 +590,6 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
         </table>
       </div>
     </>
-  )
-}
-
-// ── Configuration manager (inside a preset) ──────────────────
-function ConfigurationManager({ preset, products, onRefresh, showToast }: {
-  preset: Preset; products: Product[]; onRefresh: () => void; showToast: Props['showToast']
-}) {
-  const [newLabel, setNewLabel] = useState('')
-  const [newSuffix, setNewSuffix] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [expandedConfigId, setExpandedConfigId] = useState<string | null>(null)
-  const [addItemProductId, setAddItemProductId] = useState<Record<string, string>>({})
-  const [addItemQty, setAddItemQty] = useState<Record<string, string>>({})
-
-  const configs = (preset.preset_configurations ?? []).sort((a: PresetConfiguration, b: PresetConfiguration) => a.sort_order - b.sort_order)
-
-  const addConfig = async () => {
-    if (!newLabel.trim()) { showToast('Configuration name is required', 'error'); return }
-    setSaving(true)
-    const maxOrder = Math.max(0, ...configs.map((c: PresetConfiguration) => c.sort_order))
-    const { error } = await supabase.from('preset_configurations').insert({ preset_id: preset.id, label: newLabel.trim(), part_number_suffix: newSuffix.trim() || null, sort_order: maxOrder + 10 })
-    setSaving(false)
-    if (error) { showToast('Failed to add configuration', 'error'); return }
-    showToast('Configuration added'); setNewLabel(''); setNewSuffix(''); onRefresh()
-  }
-
-  const removeConfig = async (id: string) => {
-    if (!confirm('Delete this configuration and all its items?')) return
-    const { error } = await supabase.from('preset_configurations').delete().eq('id', id)
-    if (error) { showToast('Failed to delete configuration', 'error'); return }
-    onRefresh()
-  }
-
-  const addConfigItem = async (configId: string) => {
-    const productId = addItemProductId[configId]
-    if (!productId) { showToast('Select a product', 'error'); return }
-    const qty = parseInt(addItemQty[configId] ?? '1') || 1
-    const { error } = await supabase.from('preset_configuration_items').upsert({ configuration_id: configId, product_id: productId, quantity: qty }, { onConflict: 'configuration_id,product_id' })
-    if (error) { showToast('Failed to add item', 'error'); return }
-    showToast('Item added')
-    setAddItemProductId((p) => ({ ...p, [configId]: '' }))
-    setAddItemQty((p) => ({ ...p, [configId]: '1' }))
-    onRefresh()
-  }
-
-  const removeConfigItem = async (itemId: string) => { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh() }
-
-  const updateConfigItemQty = async (itemId: string, qty: number) => {
-    if (qty <= 0) { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh(); return }
-    await supabase.from('preset_configuration_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
-  }
-
-  return (
-    <div style={{ padding: '12px 14px', background: 'var(--secondary-light)', border: '1.5px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--secondary-text)', marginBottom: 8 }}>
-        Configurations
-        {configs.length > 0 && <span style={{ background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{configs.length}</span>}
-      </div>
-      <p style={{ fontSize: 11, color: 'var(--secondary-text)', opacity: 0.8, marginBottom: 12 }}>
-        Each configuration is a variant of this preset (e.g. Mild Steel + SD, Stainless + MCCB). Preset common items apply to all; configuration items are added on top.
-      </p>
-
-      {configs.map((config: PresetConfiguration) => {
-        const isExpanded = expandedConfigId === config.id
-        const configItems = config.preset_configuration_items ?? []
-        const usedIds = new Set(configItems.map((i: any) => i.product_id))
-        const available = products.filter((p) => !usedIds.has(p.id))
-
-        return (
-          <div key={config.id} style={{ background: 'var(--surface)', border: '1px solid var(--secondary-dark)', borderRadius: 'var(--radius-md)', marginBottom: 6, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', cursor: 'pointer', gap: 10 }} onClick={() => setExpandedConfigId(isExpanded ? null : config.id)}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{config.label}</div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 2, alignItems: 'center' }}>
-                  {config.part_number_suffix && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--secondary)', color: 'var(--secondary-text)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>suffix: {config.part_number_suffix}</span>}
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{configItems.length} item{configItems.length !== 1 ? 's' : ''}</span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                <button className="btn btn-sm btn-danger" onClick={() => removeConfig(config.id)}>Delete</button>
-                <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none', flexShrink: 0, alignSelf: 'center' }} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
-              </div>
-            </div>
-
-            {isExpanded && (
-              <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px' }}>
-                {configItems.map((item: any) => {
-                  const product = products.find((p) => p.id === item.product_id)
-                  return (
-                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                      <div style={{ flex: 1, fontSize: 13 }}>
-                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
-                        {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
-                      </div>
-                      <input type="number" min="0.01" step="any" style={{ width: 56, padding: '3px 6px', fontSize: 12, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600 }} value={item.quantity} onChange={(e) => updateConfigItemQty(item.id, parseInt(e.target.value) || 0)} />
-                      <button className="btn btn-sm btn-danger" onClick={() => removeConfigItem(item.id)}>Remove</button>
-                    </div>
-                  )
-                })}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
-                  <div style={{ flex: 2, minWidth: 180 }}>
-                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Add product</label>
-                    <select className="input input-sm" value={addItemProductId[config.id] ?? ''} onChange={(e) => setAddItemProductId((p) => ({ ...p, [config.id]: e.target.value }))}>
-                      <option value="">Select product…</option>
-                      {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
-                    </select>
-                  </div>
-                  <div style={{ width: 64 }}>
-                    <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Qty</label>
-                    <input className="input input-sm" type="number" min="0.01" step="any" value={addItemQty[config.id] ?? '1'} onChange={(e) => setAddItemQty((p) => ({ ...p, [config.id]: e.target.value }))} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
-                  </div>
-                  <button className="btn btn-sm btn-secondary" onClick={() => addConfigItem(config.id)}>Add</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      })}
-
-      <div style={{ borderTop: configs.length > 0 ? '1px solid rgba(0,0,0,0.08)' : 'none', paddingTop: configs.length > 0 ? 12 : 0, marginTop: configs.length > 0 ? 8 : 0 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Add configuration</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ flex: 2, minWidth: 160 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Label *</label>
-            <input className="input input-sm" placeholder="e.g. Mild Steel + Switch Disconnector" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 100 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 3 }}>Part no. suffix</label>
-            <input className="input input-sm" style={{ fontFamily: 'var(--mono)' }} placeholder="e.g. ZD" value={newSuffix} onChange={(e) => setNewSuffix(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addConfig() } }} />
-          </div>
-          <button className="btn btn-sm" style={{ background: 'var(--secondary)', borderColor: 'var(--secondary-dark)', color: 'var(--secondary-text)', fontWeight: 600 }} onClick={addConfig} disabled={saving || !newLabel.trim()}>Add</button>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -708,13 +635,14 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
 
   const addItem = async (presetId: string) => {
     if (!addItemProductId) { showToast('Select a product', 'error'); return }
-    const qty = parseInt(addItemQty) || 1
+    const qty = parseFloat(addItemQty) || 1
     const { error } = await supabase.from('preset_items').upsert({ preset_id: presetId, product_id: addItemProductId, quantity: qty }, { onConflict: 'preset_id,product_id' })
     if (error) { showToast('Failed to add item', 'error'); return }
     showToast('Item added'); setAddItemProductId(''); setAddItemQty('1'); onRefresh()
   }
 
   const removeItem = async (itemId: string) => { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh() }
+
   const updateItemQty = async (itemId: string, qty: number) => {
     if (qty <= 0) { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh(); return }
     await supabase.from('preset_items').update({ quantity: qty }).eq('id', itemId); onRefresh()
@@ -806,7 +734,9 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <input type="number" min="0.01" step="any" style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }} value={item.quantity} onChange={(e) => updateItemQty(item.id, parseInt(e.target.value) || 0)} />
+                        <input type="number" min="0.01" step="0.5"
+                          style={{ width: 72, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
+                          value={item.quantity} onChange={(e) => updateItemQty(item.id, parseFloat(e.target.value) || 0)} />
                         <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Remove</button>
                       </div>
                     </div>
@@ -822,7 +752,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   </div>
                   <div style={{ width: 80 }}>
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Qty</label>
-                    <input className="input input-sm" type="number" min="0.01" step="any" value={addItemQty} onChange={(e) => setAddItemQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
+                    <input className="input input-sm" type="number" min="0.01" step="0.5" value={addItemQty} onChange={(e) => setAddItemQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
                   </div>
                   <button className="btn btn-sm btn-secondary" onClick={() => addItem(preset.id)}>Add item</button>
                 </div>
