@@ -9,7 +9,7 @@ EV pillar quotation tool for sales reps — React + Vite + TypeScript + Supabase
 ### 1. Supabase
 
 1. Go to [supabase.com](https://supabase.com) and create a new project 
-2. In the Supabase dashboard, open **SQL Editor**.
+2. In the Supabase dashboard, open **SQL Editor**. 
 3. Paste the contents of `supabase-schema.sql` and run it. This creates all tables, RLS policies, and seeds the 51 products.
 4. Go to **Project Settings → API** and copy:
    - Project URL
