@@ -3,7 +3,7 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, QuoteExtra, ExtraCountMap,
+  Extra, BuildContext, QuoteExtra, ExtraCountMap, QuoteBuild,
 } from './types'
 import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
 import Header from './components/Header'
@@ -18,8 +18,11 @@ import PartRequests from './components/PartRequests'
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
-  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '',
+  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '',
 }
+
+// The saved quote currently loaded into the builder for editing
+export interface EditingQuote { id: string; project_name: string }
 
 export default function App() {
   const [view, setView] = useState<View>('builder')
@@ -43,6 +46,7 @@ export default function App() {
   const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
   const [extraCounts, setExtraCounts] = useState<ExtraCountMap>({})
   const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
+  const [editingQuote, setEditingQuote] = useState<EditingQuote | null>(null)
 
   const [toast, setToast] = useState<ToastState | null>(null)
 
@@ -199,21 +203,42 @@ export default function App() {
 
   useEffect(() => { if (view === 'quotes') loadQuotes() }, [view, loadQuotes])
 
-  const saveQuote = async (formData: QuoteFormData): Promise<boolean> => {
+  const resetBuilder = useCallback(() => {
+    setQuantities({})
+    setVariantSelections({})
+    setAutoAdded({})
+    setQuoteForm(DEFAULT_FORM)
+    setSelectedExtras(new Set())
+    setExtraCounts({})
+    setBuildContext(EMPTY_CONTEXT)
+    setEditingQuote(null)
+  }, [])
+
+  // asNew: when editing, save a copy instead of overwriting the original
+  const saveQuote = async (formData: QuoteFormData, asNew = false): Promise<boolean> => {
     const finalQty = extrasResult.effectiveQty
     const activeItems = products.filter((p) => (finalQty[p.id] ?? 0) > 0)
     if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
     const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
-    const upliftPct = settings.hardware_uplift_pct
+    const upliftPct = formData.uplift_pct.trim() === '' ? settings.hardware_uplift_pct : (parseFloat(formData.uplift_pct) || 0)
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
     const labourMinutes = (parseFloat(formData.labour_minutes) || 0) + extrasResult.labourMinutes
     const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) }))
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
+    const build: QuoteBuild = {
+      base_quantities: quantities,
+      variant_selections: variantSelections,
+      auto_added: autoAdded,
+      selected_extras: Array.from(selectedExtras),
+      extra_counts: extraCounts,
+      build_context: buildContext,
+      labour_minutes: formData.labour_minutes,
+    }
 
-    const { data: quoteData, error: quoteError } = await supabase.from('quotes').insert({
+    const quoteRow = {
       project_name: formData.project_name.trim(),
       customer_name: formData.customer_name.trim() || null,
       mo_number: formData.mo_number.trim() || null,
@@ -226,10 +251,15 @@ export default function App() {
       labour_rate_per_min: labourRate,
       labour_total: labourTotal,
       extras: quoteExtras,
-      status: 'draft',
-    }).select().single()
+      build,
+    }
 
-    if (quoteError || !quoteData) { showToast('Failed to save quote', 'error'); return false }
+    const updating = editingQuote != null && !asNew
+    const { data: quoteData, error: quoteError } = updating
+      ? await supabase.from('quotes').update(quoteRow).eq('id', editingQuote.id).select().single()
+      : await supabase.from('quotes').insert({ ...quoteRow, status: 'draft' }).select().single()
+
+    if (quoteError || !quoteData) { showToast(updating ? 'Failed to update quote' : 'Failed to save quote', 'error'); return false }
 
     const itemsToInsert = activeItems.map((p) => {
       const selectedVariantId = variantSelections[p.id] ?? null
@@ -247,18 +277,73 @@ export default function App() {
       }
     })
 
-    const { error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert)
-    if (itemsError) { showToast('Quote saved but items failed to save', 'error'); return false }
+    const { data: newItems, error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert).select('id')
+    if (itemsError) { showToast(updating ? 'Quote updated but items failed to save — the old items were kept' : 'Quote saved but items failed to save', 'error'); return false }
 
-    showToast('Quote saved successfully')
-    setQuantities({})
-    setVariantSelections({})
-    setAutoAdded({})
-    setQuoteForm(DEFAULT_FORM)
-    setSelectedExtras(new Set())
-    setExtraCounts({})
-    setBuildContext(EMPTY_CONTEXT)
+    // New lines are in, so the old ones can go (if this fails the quote still has its old lines too)
+    if (updating) {
+      const keep = (newItems ?? []).map((i) => i.id)
+      const { error: deleteError } = await supabase.from('quote_items').delete().eq('quote_id', quoteData.id).not('id', 'in', `(${keep.join(',')})`)
+      if (deleteError) { showToast('Quote updated but old items could not be removed', 'error'); return false }
+    }
+
+    showToast(updating ? 'Quote updated' : 'Quote saved successfully')
+    resetBuilder()
     return true
+  }
+
+  // Put a saved quote back into the builder
+  const editQuote = (quote: Quote) => {
+    const hasWork = Object.keys(quantities).length > 0 || selectedExtras.size > 0
+    if (hasWork && editingQuote?.id !== quote.id && !confirm('Replace what is in the builder with this quote?')) return
+
+    const productIds = new Set(products.map((p) => p.id))
+    const extraIds = new Set(extras.map((e) => e.id))
+    const build = quote.build
+    let missing = 0
+    let extrasFolded = false
+
+    let base: QuantityMap = {}
+    let selections: VariantSelectionMap = {}
+    if (build) {
+      Object.entries(build.base_quantities ?? {}).forEach(([id, qty]) => { if (productIds.has(id)) base[id] = qty; else missing++ })
+      Object.entries(build.variant_selections ?? {}).forEach(([id, v]) => { if (base[id]) selections[id] = v })
+    } else {
+      // Saved before quotes kept their build: quote_items are the final quantities,
+      // so load them as they are, with any extras already folded in as normal parts
+      ;(quote.quote_items ?? []).forEach((item) => {
+        if (!item.product_id || !productIds.has(item.product_id)) { missing++; return }
+        base[item.product_id] = (base[item.product_id] ?? 0) + Number(item.quantity)
+        if (item.variant_id) selections[item.product_id] = item.variant_id
+      })
+      extrasFolded = (quote.extras ?? []).length > 0
+    }
+
+    setQuantities(base)
+    setVariantSelections(selections)
+    setAutoAdded(build?.auto_added ?? {})
+    setSelectedExtras(new Set((build?.selected_extras ?? []).filter((id) => extraIds.has(id))))
+    setExtraCounts(build?.extra_counts ?? {})
+    setBuildContext(build?.build_context ?? EMPTY_CONTEXT)
+    setQuoteForm({
+      project_name: quote.project_name,
+      customer_name: quote.customer_name ?? '',
+      mo_number: quote.mo_number ?? '',
+      notes: quote.notes ?? '',
+      labour_minutes: build ? build.labour_minutes : (Number(quote.labour_minutes) ? String(quote.labour_minutes) : ''),
+      uplift_pct: Number(quote.hardware_uplift_pct) === settings.hardware_uplift_pct ? '' : String(quote.hardware_uplift_pct),
+    })
+    setEditingQuote({ id: quote.id, project_name: quote.project_name })
+    setView('builder')
+
+    if (missing > 0) showToast(`${missing} item${missing !== 1 ? 's are' : ' is'} no longer in the catalogue and ${missing !== 1 ? 'were' : 'was'} left out`, 'error')
+    else if (extrasFolded) showToast('Older quote: extras are loaded as normal parts, so they are not ticked', 'error')
+    else showToast(`Editing "${quote.project_name}"`)
+  }
+
+  const cancelEdit = () => {
+    if (!confirm('Stop editing? Unsaved changes will be lost.')) return
+    resetBuilder()
   }
 
   const updateQuoteStatus = async (quoteId: string, status: string) => {
@@ -270,7 +355,12 @@ export default function App() {
   const deleteQuote = async (quoteId: string) => {
     const { error } = await supabase.from('quotes').delete().eq('id', quoteId)
     if (error) showToast('Failed to delete quote', 'error')
-    else { setQuotes((prev) => prev.filter((q) => q.id !== quoteId)); showToast('Quote deleted') }
+    else {
+      setQuotes((prev) => prev.filter((q) => q.id !== quoteId))
+      // Nothing left to update, so a save from the builder becomes a new quote
+      if (editingQuote?.id === quoteId) setEditingQuote(null)
+      showToast('Quote deleted')
+    }
   }
 
   useEffect(() => {
@@ -307,10 +397,11 @@ export default function App() {
             settings={settings}
             extras={extras} selectedExtras={selectedExtras} onToggleExtra={toggleExtra} onSetExtraCount={setExtraCount} onClearExtras={clearExtras}
             extrasResult={extrasResult} buildContext={buildContext} setBuildContext={setBuildContext}
+            editingQuote={editingQuote} onCancelEdit={cancelEdit}
           />
         )}
         {view === 'quotes' && (
-          <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} isAdmin={isAdmin} />
+          <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} onEdit={editQuote} isAdmin={isAdmin} />
         )}
         {view === 'admin' && isAdmin && (
           <AdminPanel
