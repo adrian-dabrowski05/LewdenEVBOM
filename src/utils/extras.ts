@@ -1,4 +1,4 @@
-import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset } from '../types'
+import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, ExtraCountMap } from '../types'
 
 export const MATERIAL_LABELS: Record<CabinetMaterial, string> = {
   mild_steel: 'Mild steel (Zintec)',
@@ -66,6 +66,8 @@ export interface ExtraLine {
 export interface AppliedExtra {
   extra: Extra
   lines: ExtraLine[]
+  count: number             // times applied (always 1 unless the extra scales with the BOM)
+  maxCount: number | null   // most it could be applied, null = no limit
 }
 
 export interface ExtrasResult {
@@ -79,7 +81,10 @@ export interface ExtrasResult {
 // Removals only take away what is actually there; an "only if removed" add is
 // skipped when that extra's removals found nothing (so a swap never adds a part
 // that wasn't replacing anything).
-export function computeExtras(extras: Extra[], selected: Set<string>, ctx: BuildContext, baseQty: QuantityMap): ExtrasResult {
+// An extra that scales with the BOM applies its lines `count` times. By default
+// that is as many times as its Remove lines can be met (e.g. every Type A RCD
+// in the BOM); the rep can lower it with the stepper in the Extras panel.
+export function computeExtras(extras: Extra[], selected: Set<string>, ctx: BuildContext, baseQty: QuantityMap, counts: ExtraCountMap = {}): ExtrasResult {
   const qty: QuantityMap = { ...baseQty }
   const applied: AppliedExtra[] = []
   let labourMinutes = 0
@@ -92,22 +97,33 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     const items = (extra.extra_items ?? []).filter((i) => lineApplies(i, ctx)).sort((a, b) => a.sort_order - b.sort_order)
     const lines: ExtraLine[] = []
     let removedSomething = false
+    const removedIds = new Set<string>()
+
+    let count = 1
+    let maxCount: number | null = null
+    if (extra.scales_with_bom) {
+      const removes = items.filter((i) => i.action === 'remove')
+      if (removes.length > 0) maxCount = Math.min(...removes.map((i) => Math.floor((qty[i.product_id] ?? 0) / i.quantity)))
+      const wanted = counts[extra.id] ?? maxCount ?? 1
+      count = Math.max(0, maxCount != null ? Math.min(wanted, maxCount) : wanted)
+    }
 
     items.filter((i) => i.action === 'remove').forEach((i) => {
       const have = qty[i.product_id] ?? 0
-      const take = Math.min(have, i.quantity)
-      if (take > 0) { qty[i.product_id] = have - take; removedSomething = true }
-      lines.push({ product_id: i.product_id, action: 'remove', quantity: take, requested: i.quantity })
+      const take = Math.min(have, i.quantity * count)
+      if (take > 0) { qty[i.product_id] = have - take; removedSomething = true; removedIds.add(i.product_id) }
+      lines.push({ product_id: i.product_id, action: 'remove', quantity: take, requested: i.quantity * count })
     })
 
     items.filter((i) => i.action === 'add').forEach((i) => {
-      const add = i.only_if_removed && !removedSomething ? 0 : i.quantity
+      const skip = i.if_removed_product_id ? !removedIds.has(i.if_removed_product_id) : i.only_if_removed && !removedSomething
+      const add = skip ? 0 : i.quantity * count
       if (add > 0) qty[i.product_id] = (qty[i.product_id] ?? 0) + add
-      lines.push({ product_id: i.product_id, action: 'add', quantity: add, requested: i.quantity })
+      lines.push({ product_id: i.product_id, action: 'add', quantity: add, requested: i.quantity * count })
     })
 
     labourMinutes += Number(extra.labour_minutes) || 0
-    applied.push({ extra, lines })
+    applied.push({ extra, lines, count, maxCount })
   })
 
   const delta: QuantityMap = {}

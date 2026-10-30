@@ -36,6 +36,7 @@ create table if not exists extras (
   labour_minutes    numeric not null default 0,
   allowed_ratings   integer[],                         -- e.g. {100,125}; null = any rating
   allowed_materials text[],                            -- e.g. {mild_steel}; null = any cabinet
+  scales_with_bom   boolean not null default false,    -- rep picks how many (e.g. RCDs to swap)
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );
@@ -49,6 +50,7 @@ create table if not exists extra_items (
   condition_rating integer,           -- only applies at this current rating (e.g. 125)
   condition_size   integer,           -- only applies to this cabinet size (1, 2 or 3)
   only_if_removed  boolean not null default false,  -- add only if this extra's removals found something
+  if_removed_product_id uuid references products(id) on delete set null,  -- add only if this extra removed that part
   sort_order       integer not null default 0,
   created_at       timestamptz default now()
 );
@@ -160,13 +162,9 @@ with pid as (
   order by upper(trim(part_number)), sort_order
 ),
 lines(extra_no, pn, action, qty, cond_rating, cond_size, only_if_removed, sort_order) as (values
-  -- 2: Type 1 surge — swap the type 2 surge and the RCCB
+  -- 2: Type 1 surge — swap the type 2 surge (fuses: see extras-3-surge-fuses.sql)
   (2,  'SRG3V1G',            'remove', 1, null::int, null::int, false, 10),
-  (2,  'B100/30/2A',         'remove', 1, null, null, false, 20),
-  (2,  'B100/30/2B',         'remove', 1, null, null, false, 30),
-  (2,  'BSRG3123',           'add',    1, null, null, false, 40),
-  (2,  'BFD22581',           'add',    3, null, null, false, 50),
-  (2,  'BF063A',             'add',    1, null, null, false, 60),
+  (2,  'BSRG3123',           'add',    1, null, null, false, 30),
   -- 4: Open PEN fault protection (100A / 125A only)
   (4,  'LCR1703',            'add',    1, null, null, false, 10),
   (4,  'LCR1727',            'add',    1, null, null, false, 20),

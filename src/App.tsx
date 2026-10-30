@@ -3,7 +3,7 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, QuoteExtra,
+  Extra, BuildContext, QuoteExtra, ExtraCountMap,
 } from './types'
 import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
 import Header from './components/Header'
@@ -41,6 +41,7 @@ export default function App() {
   const [autoAdded, setAutoAdded] = useState<AutoAddedMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
   const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
+  const [extraCounts, setExtraCounts] = useState<ExtraCountMap>({})
   const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
 
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -88,14 +89,20 @@ export default function App() {
 
   const toggleExtra = useCallback((extraId: string) => {
     setSelectedExtras((prev) => { const next = new Set(prev); next.has(extraId) ? next.delete(extraId) : next.add(extraId); return next })
+    // Re-ticking starts again from "replace all"
+    setExtraCounts((prev) => { const next = { ...prev }; delete next[extraId]; return next })
   }, [])
 
-  const clearExtras = useCallback(() => setSelectedExtras(new Set()), [])
+  const setExtraCount = useCallback((extraId: string, count: number) => {
+    setExtraCounts((prev) => ({ ...prev, [extraId]: Math.max(0, count) }))
+  }, [])
+
+  const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}) }, [])
 
   // Final BOM = rep's quantities with the ticked extras applied on top
   const extrasResult = useMemo(
-    () => computeExtras(extras, selectedExtras, buildContext, quantities),
-    [extras, selectedExtras, buildContext, quantities],
+    () => computeExtras(extras, selectedExtras, buildContext, quantities, extraCounts),
+    [extras, selectedExtras, buildContext, quantities, extraCounts],
   )
 
   useEffect(() => { loadSettings() }, [])
@@ -201,7 +208,7 @@ export default function App() {
     const upliftPct = settings.hardware_uplift_pct
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
     const labourMinutes = (parseFloat(formData.labour_minutes) || 0) + extrasResult.labourMinutes
-    const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0 }))
+    const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) }))
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
@@ -249,6 +256,7 @@ export default function App() {
     setAutoAdded({})
     setQuoteForm(DEFAULT_FORM)
     setSelectedExtras(new Set())
+    setExtraCounts({})
     setBuildContext(EMPTY_CONTEXT)
     return true
   }
@@ -297,7 +305,7 @@ export default function App() {
             onSave={saveQuote} showToast={showToast}
             presets={presets} onApplyPreset={applyPreset}
             settings={settings}
-            extras={extras} selectedExtras={selectedExtras} onToggleExtra={toggleExtra} onClearExtras={clearExtras}
+            extras={extras} selectedExtras={selectedExtras} onToggleExtra={toggleExtra} onSetExtraCount={setExtraCount} onClearExtras={clearExtras}
             extrasResult={extrasResult} buildContext={buildContext} setBuildContext={setBuildContext}
           />
         )}

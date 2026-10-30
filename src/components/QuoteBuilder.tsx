@@ -30,6 +30,7 @@ interface Props {
   extras: Extra[]
   selectedExtras: Set<string>
   onToggleExtra: (extraId: string) => void
+  onSetExtraCount: (extraId: string, count: number) => void
   onClearExtras: () => void
   extrasResult: ExtrasResult
   buildContext: BuildContext
@@ -332,10 +333,11 @@ function PresetsBar({ presets, products, onApply }: {
 }
 
 // ── Extras panel ───────────────────────────────────────────────
-function ExtrasPanel({ extras, selected, onToggle, result, ctx, setCtx, productsById }: {
+function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setCtx, productsById }: {
   extras: Extra[]
   selected: Set<string>
   onToggle: (extraId: string) => void
+  onSetCount: (extraId: string, count: number) => void
   result: ExtrasResult
   ctx: BuildContext
   setCtx: (ctx: BuildContext) => void
@@ -396,6 +398,21 @@ function ExtrasPanel({ extras, selected, onToggle, result, ctx, setCtx, products
                   {reason && <div style={{ fontSize: 12, color: isTicked ? 'var(--danger)' : 'var(--text-3)', marginTop: 2 }}>{isTicked ? `Not applied: ${reason}` : reason}</div>}
                 </div>
               </label>
+              {applied && extra.scales_with_bom && (() => {
+                const max = applied.maxCount
+                const btn = (enabled: boolean) => ({ width: 28, height: 28, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border-strong)', background: 'var(--surface)', fontSize: 16, lineHeight: 1, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.35 })
+                const canDown = applied.count > 0
+                const canUp = max == null || applied.count < max
+                return (
+                  <div style={{ marginTop: 8, marginLeft: 26, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{max != null ? 'Replace' : 'Quantity'}</span>
+                    <button type="button" style={btn(canDown)} disabled={!canDown} onClick={() => onSetCount(extra.id, applied.count - 1)} aria-label="Fewer">−</button>
+                    <span style={{ minWidth: 24, textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14 }}>{applied.count}</span>
+                    <button type="button" style={btn(canUp)} disabled={!canUp} onClick={() => onSetCount(extra.id, applied.count + 1)} aria-label="More">+</button>
+                    {max != null && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>of {max} in the BOM</span>}
+                  </div>
+                )
+              })()}
               {lines.length > 0 && (
                 <div style={{ marginTop: 6, marginLeft: 26, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {lines.map((l, i) => {
@@ -425,7 +442,7 @@ export default function QuoteBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onClearExtras, extrasResult, buildContext, setBuildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
 }: Props) {
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -547,7 +564,7 @@ export default function QuoteBuilder({
           variant_label: selectedVariant?.label ?? null,
         }
       }),
-      extras: extrasResult.applied.map(({ extra }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0 })),
+      extras: extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) })),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, grandTotal,
       baseUrl: (import.meta as any).env.BASE_URL,
@@ -668,7 +685,7 @@ export default function QuoteBuilder({
         </div>
       </div>
 
-      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} />
+      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} />
 
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" />
