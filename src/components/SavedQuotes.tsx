@@ -174,6 +174,15 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                 <div className="quote-card-body">
                   {q.notes && <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12, fontStyle: 'italic' }}>{q.notes}</p>}
 
+                  {(q.extras ?? []).length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Extras</span>
+                      {(q.extras ?? []).map((e) => (
+                        <span key={e.number} style={{ fontSize: 12, fontWeight: 500, background: 'var(--brand-light)', color: 'var(--brand)', border: '1px solid var(--brand)', padding: '2px 8px', borderRadius: 99 }}>{e.number}. {e.name}</span>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Status + actions */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
                     <label style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</label>

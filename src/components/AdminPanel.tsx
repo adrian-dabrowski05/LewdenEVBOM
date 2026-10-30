@@ -1,8 +1,9 @@
 import { useState, useMemo, Fragment } from 'react'
-import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, PresetConfiguration, Category, AppSettings } from '../types'
+import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, PresetConfiguration, Category, AppSettings, Extra } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
+import ExtrasAdmin from './ExtrasAdmin'
 
 interface Props {
   products: Product[]
@@ -15,10 +16,12 @@ interface Props {
   onRefreshSettings: () => void
   onRefreshVariants: () => void
   onRefreshPrerequisites: () => void
+  extras: Extra[]
+  onRefreshExtras: () => void
   showToast: (msg: string, type?: 'success' | 'error') => void
 }
 
-type AdminTab = 'products' | 'presets' | 'settings'
+type AdminTab = 'products' | 'presets' | 'extras' | 'settings'
 type ProductPanel = 'variants' | 'prerequisites' | null
 
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
@@ -830,7 +833,7 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
 }
 
 // ── Main ──────────────────────────────────────────────────────
-export default function AdminPanel({ products, presets, settings, variants, prerequisites, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, onRefreshPrerequisites, showToast }: Props) {
+export default function AdminPanel({ products, presets, settings, variants, prerequisites, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, onRefreshPrerequisites, extras, onRefreshExtras, showToast }: Props) {
   const [tab, setTab] = useState<AdminTab>('products')
 
   return (
@@ -841,11 +844,16 @@ export default function AdminPanel({ products, presets, settings, variants, prer
           Presets
           {presets.length > 0 && <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>{presets.length}</span>}
         </button>
+        <button className={`admin-tab ${tab === 'extras' ? 'active' : ''}`} onClick={() => setTab('extras')}>
+          Extras
+          {extras.length > 0 && <span style={{ marginLeft: 6, background: 'var(--secondary)', color: 'var(--secondary-text)', borderRadius: 99, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>{extras.length}</span>}
+        </button>
         <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
 
       {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} showToast={showToast} />}
       {tab === 'presets' && <PresetsTab products={products} presets={presets} onRefresh={onRefreshPresets} showToast={showToast} />}
+      {tab === 'extras' && <ExtrasAdmin extras={extras} products={products} onRefresh={onRefreshExtras} showToast={showToast} />}
       {tab === 'settings' && <SettingsTab settings={settings} onRefresh={onRefreshSettings} showToast={showToast} />}
     </>
   )
