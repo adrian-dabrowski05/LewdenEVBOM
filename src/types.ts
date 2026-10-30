@@ -179,6 +179,7 @@ export interface Extra {
   labour_minutes: number
   allowed_ratings: number[] | null
   allowed_materials: CabinetMaterial[] | null
+  scales_with_bom: boolean   // rep picks how many times it applies, e.g. how many RCDs to swap
   created_at: string
   updated_at: string
   extra_items?: ExtraItem[]
@@ -188,6 +189,12 @@ export interface QuoteExtra {
   number: number
   name: string
   labour_minutes: number
+  count?: number
+}
+
+// How many times the rep wants each "scales with BOM" extra applied (missing = as many as possible)
+export interface ExtraCountMap {
+  [extraId: string]: number
 }
 
 // What the pillar is, used to decide which extras (and which extra lines) apply

@@ -36,6 +36,7 @@ create table if not exists extras (
   labour_minutes    numeric not null default 0,
   allowed_ratings   integer[],                         -- e.g. {100,125}; null = any rating
   allowed_materials text[],                            -- e.g. {mild_steel}; null = any cabinet
+  scales_with_bom   boolean not null default false,    -- rep picks how many (e.g. RCDs to swap)
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );

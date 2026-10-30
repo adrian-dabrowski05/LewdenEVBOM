@@ -178,7 +178,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12 }}>
                       <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Extras</span>
                       {(q.extras ?? []).map((e) => (
-                        <span key={e.number} style={{ fontSize: 12, fontWeight: 500, background: 'var(--brand-light)', color: 'var(--brand)', border: '1px solid var(--brand)', padding: '2px 8px', borderRadius: 99 }}>{e.number}. {e.name}</span>
+                        <span key={e.number} style={{ fontSize: 12, fontWeight: 500, background: 'var(--brand-light)', color: 'var(--brand)', border: '1px solid var(--brand)', padding: '2px 8px', borderRadius: 99 }}>{e.number}. {e.name}{e.count != null ? ` ×${e.count}` : ''}</span>
                       ))}
                     </div>
                   )}

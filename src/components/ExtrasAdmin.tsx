@@ -15,6 +15,7 @@ interface MetaBuffer {
   labour_minutes: string
   allowed_ratings: number[]
   allowed_materials: CabinetMaterial[]
+  scales_with_bom: boolean
 }
 
 const toBuffer = (e: Extra): MetaBuffer => ({
@@ -24,6 +25,7 @@ const toBuffer = (e: Extra): MetaBuffer => ({
   labour_minutes: e.labour_minutes ? String(e.labour_minutes) : '',
   allowed_ratings: e.allowed_ratings ?? [],
   allowed_materials: e.allowed_materials ?? [],
+  scales_with_bom: e.scales_with_bom ?? false,
 })
 
 function toggleIn<T>(list: T[], value: T): T[] {
@@ -194,6 +196,7 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
       labour_minutes: parseFloat(buf.labour_minutes) || 0,
       allowed_ratings: buf.allowed_ratings.length ? [...buf.allowed_ratings].sort((a, b) => a - b) : null,
       allowed_materials: buf.allowed_materials.length ? buf.allowed_materials : null,
+      scales_with_bom: buf.scales_with_bom,
     }).eq('id', id)
     setSaving(false)
     if (error) { showToast('Failed to save extra', 'error'); return }
@@ -249,6 +252,13 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                           {buf.is_enabled ? 'Reps can tick it' : 'Greyed out'}
                         </label>
                       </div>
+                      <div>
+                        <label style={smallLabel}>Rep picks how many</label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, height: 34, cursor: 'pointer' }} title="Shows a − / + count when ticked. With Remove lines it starts at every match in the BOM (e.g. all Type A RCDs) and can't go higher.">
+                          <input type="checkbox" checked={buf.scales_with_bom} onChange={(e) => setBuf({ ...buf, scales_with_bom: e.target.checked })} />
+                          {buf.scales_with_bom ? 'Lines repeat for each one' : 'Applies once'}
+                        </label>
+                      </div>
                     </div>
                     <div style={{ marginBottom: 10 }}>
                       <label style={smallLabel}>Only for these current ratings (none ticked = any)</label>
@@ -286,6 +296,7 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                     <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                       {Number(extra.labour_minutes) > 0 && <span style={{ color: 'var(--brand)' }}>+{extra.labour_minutes} min labour</span>}
                       {(extra.allowed_ratings ?? []).length > 0 && <span>{(extra.allowed_ratings ?? []).map((r) => `${r}A`).join(' / ')} only</span>}
+                      {extra.scales_with_bom && <span>Rep picks how many</span>}
                       {(extra.allowed_materials ?? []).length > 0 && <span>{(extra.allowed_materials ?? []).map((m) => MATERIAL_LABELS[m] ?? m).join(' / ')} only</span>}
                     </div>
                   </>

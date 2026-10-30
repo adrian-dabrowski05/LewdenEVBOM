@@ -159,7 +159,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   </div>
 
   ${notes ? `<div class="notes">${notes}</div>` : ''}
-  ${extras.length > 0 ? `<div class="extras"><span class="label">Extras</span>${extras.map((e) => `${e.number}. ${e.name}`).join(' · ')}</div>` : ''}
+  ${extras.length > 0 ? `<div class="extras"><span class="label">Extras</span>${extras.map((e) => `${e.number}. ${e.name}${e.count != null ? ` ×${e.count}` : ''}`).join(' · ')}</div>` : ''}
 
   <table>
     <thead>
