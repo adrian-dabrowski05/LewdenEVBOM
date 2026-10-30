@@ -97,6 +97,7 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     const items = (extra.extra_items ?? []).filter((i) => lineApplies(i, ctx)).sort((a, b) => a.sort_order - b.sort_order)
     const lines: ExtraLine[] = []
     let removedSomething = false
+    const removedIds = new Set<string>()
 
     let count = 1
     let maxCount: number | null = null
@@ -110,12 +111,13 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     items.filter((i) => i.action === 'remove').forEach((i) => {
       const have = qty[i.product_id] ?? 0
       const take = Math.min(have, i.quantity * count)
-      if (take > 0) { qty[i.product_id] = have - take; removedSomething = true }
+      if (take > 0) { qty[i.product_id] = have - take; removedSomething = true; removedIds.add(i.product_id) }
       lines.push({ product_id: i.product_id, action: 'remove', quantity: take, requested: i.quantity * count })
     })
 
     items.filter((i) => i.action === 'add').forEach((i) => {
-      const add = i.only_if_removed && !removedSomething ? 0 : i.quantity * count
+      const skip = i.if_removed_product_id ? !removedIds.has(i.if_removed_product_id) : i.only_if_removed && !removedSomething
+      const add = skip ? 0 : i.quantity * count
       if (add > 0) qty[i.product_id] = (qty[i.product_id] ?? 0) + add
       lines.push({ product_id: i.product_id, action: 'add', quantity: add, requested: i.quantity * count })
     })

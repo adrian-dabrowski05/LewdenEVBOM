@@ -166,6 +166,7 @@ export interface ExtraItem {
   condition_rating: number | null
   condition_size: number | null
   only_if_removed: boolean
+  if_removed_product_id: string | null   // add only if this extra removed this product
   sort_order: number
   created_at: string
 }

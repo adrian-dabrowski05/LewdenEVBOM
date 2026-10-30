@@ -52,10 +52,24 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
   const [qty, setQty] = useState('1')
   const [rating, setRating] = useState('')
   const [size, setSize] = useState('')
-  const [onlyIfRemoved, setOnlyIfRemoved] = useState(false)
+  const [when, setWhen] = useState('')
   const [saving, setSaving] = useState(false)
 
   const items = [...(extra.extra_items ?? [])].sort((a, b) => a.sort_order - b.sort_order)
+
+  // "When" for an Add line: always, if anything was removed, or if one specific Remove line found its part
+  const removeProducts = Array.from(new Set(items.filter((i) => i.action === 'remove').map((i) => i.product_id)))
+  const whenOf = (i: ExtraItem) => i.if_removed_product_id ?? (i.only_if_removed ? '*' : '')
+  const whenFields = (value: string) => ({ only_if_removed: value === '*', if_removed_product_id: value && value !== '*' ? value : null })
+  const productLabel = (id: string) => { const p = products.find((x) => x.id === id); return p ? (p.part_number || p.description) : 'Unknown' }
+  const WhenSelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <select className="input input-sm" style={{ width: 'auto' }} title="When this part is added" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Always</option>
+      {removeProducts.length > 0 && <option value="*">Only if anything removed</option>}
+      {removeProducts.map((id) => <option key={id} value={id}>Only if {productLabel(id)} removed</option>)}
+      {value && value !== '*' && !removeProducts.includes(value) && <option value={value}>Only if {productLabel(value)} removed</option>}
+    </select>
+  )
 
   const addItem = async () => {
     if (!productId) { showToast('Select a product', 'error'); return }
@@ -67,12 +81,12 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
       extra_id: extra.id, product_id: productId, action, quantity,
       condition_rating: rating ? Number(rating) : null,
       condition_size: size ? Number(size) : null,
-      only_if_removed: action === 'add' && onlyIfRemoved,
+      ...whenFields(action === 'add' ? when : ''),
       sort_order: maxOrder + 10,
     })
     setSaving(false)
     if (error) { showToast('Failed to add item', 'error'); return }
-    showToast('Item added'); setProductId(''); setQty('1'); setRating(''); setSize(''); setOnlyIfRemoved(false); onRefresh()
+    showToast('Item added'); setProductId(''); setQty('1'); setRating(''); setSize(''); setWhen(''); onRefresh()
   }
 
   const updateItem = async (item: ExtraItem, update: Partial<ExtraItem>) => {
@@ -119,12 +133,7 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
                 <option value="">Any size</option>
                 {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n} only</option>)}
               </select>
-              {!isRemove && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-2)', cursor: 'pointer' }} title="Only add this if one of this extra's Remove lines found something to remove">
-                  <input type="checkbox" checked={item.only_if_removed} onChange={(e) => updateItem(item, { only_if_removed: e.target.checked })} />
-                  Only if swapped
-                </label>
-              )}
+              {!isRemove && <WhenSelect value={whenOf(item)} onChange={(v) => updateItem(item, whenFields(v))} />}
               <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Delete</button>
             </div>
           </div>
@@ -162,15 +171,15 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
           </select>
         </div>
         {action === 'add' && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-2)', paddingBottom: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={onlyIfRemoved} onChange={(e) => setOnlyIfRemoved(e.target.checked)} />
-            Only if swapped
-          </label>
+          <div>
+            <label style={smallLabel}>When</label>
+            <WhenSelect value={when} onChange={setWhen} />
+          </div>
         )}
         <button className="btn btn-sm btn-secondary" onClick={addItem} disabled={saving}>{saving ? 'Adding…' : 'Add line'}</button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 10 }}>
-        To swap a part, add a <strong>Remove</strong> line for the old part and an <strong>Add</strong> line for the new one. Tick "Only if swapped" on the Add line if the new part should only go on when the old part was actually in the BOM.
+        To swap a part, add a <strong>Remove</strong> line for the old part and an <strong>Add</strong> line for the new one. Set the Add line's "When" to "Only if … removed" if the new part should only go on when that old part was actually in the BOM.
       </p>
     </div>
   )
