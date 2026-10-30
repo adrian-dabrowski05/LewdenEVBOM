@@ -1,4 +1,4 @@
-import type { Quote } from '../types'
+import type { Quote, QuoteExtra } from '../types'
 
 interface PrintItem {
   description: string
@@ -23,6 +23,7 @@ interface PrintQuoteOptions {
   labourTotal: number
   grandTotal: number
   baseUrl: string
+  extras?: QuoteExtra[]
 }
 
 function buildPrintWindow(opts: PrintQuoteOptions) {
@@ -31,6 +32,8 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     materialsSubtotal, hardwareUpliftPct, hardwareUpliftAmount,
     labourMinutes, labourRatePerMin, labourTotal, grandTotal, baseUrl,
   } = opts
+  const extras = opts.extras ?? []
+  const extrasLabour = extras.reduce((sum, e) => sum + (Number(e.labour_minutes) || 0), 0)
 
   const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : '—'
   const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -51,7 +54,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
 
   const labourRow = labourTotal > 0 ? `
     <tr class="summary-row labour-row">
-      <td colspan="4" class="right label">Labour (${labourMinutes} min @ £${labourRatePerMin.toFixed(4)}/min)</td>
+      <td colspan="4" class="right label">Labour (${labourMinutes} min${extrasLabour > 0 ? `, incl. ${extrasLabour} for extras` : ''} @ £${labourRatePerMin.toFixed(4)}/min)</td>
       <td class="right">£${labourTotal.toFixed(2)}</td>
     </tr>
   ` : ''
@@ -89,6 +92,8 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     .meta-box .sub { font-size: 9pt; color: #5c6070; margin-top: 2px; }
     .mo-badge { display: inline-block; background: #004A9A; color: #fff; padding: 2px 10px; border-radius: 4px; font-size: 10pt; font-weight: 600; font-family: 'Courier New', monospace; }
 
+    .extras { background: #eef4ff; border-left: 3px solid #004A9A; padding: 8px 12px; margin-bottom: 20px; font-size: 10pt; color: #003578; border-radius: 0 4px 4px 0; }
+    .extras .label { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 8px; }
     .notes { background: #fffbe6; border-left: 3px solid #FFCC00; padding: 8px 12px; margin-bottom: 20px; font-size: 10pt; color: #5c4200; border-radius: 0 4px 4px 0; }
 
     table { width: 100%; border-collapse: collapse; margin-bottom: 0; font-size: 10pt; }
@@ -154,6 +159,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   </div>
 
   ${notes ? `<div class="notes">${notes}</div>` : ''}
+  ${extras.length > 0 ? `<div class="extras"><span class="label">Extras</span>${extras.map((e) => `${e.number}. ${e.name}`).join(' · ')}</div>` : ''}
 
   <table>
     <thead>
@@ -205,6 +211,7 @@ export interface PrintFromBuilderOptions {
   labourTotal: number
   grandTotal: number
   baseUrl: string
+  extras?: QuoteExtra[]
 }
 
 export function printQuote(opts: PrintFromBuilderOptions) {
@@ -222,6 +229,7 @@ export function printQuote(opts: PrintFromBuilderOptions) {
     labourTotal: opts.labourTotal,
     grandTotal: opts.grandTotal,
     baseUrl: opts.baseUrl,
+    extras: opts.extras,
   })
   openPrint(html)
 }
@@ -251,6 +259,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
     labourTotal: quote.labour_total ?? 0,
     grandTotal: quote.grand_total ?? 0,
     baseUrl,
+    extras: quote.extras ?? [],
   })
   openPrint(html)
 }

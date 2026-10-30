@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
+  Extra, BuildContext, QuoteExtra,
 } from './types'
+import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -29,6 +31,7 @@ export default function App() {
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [prerequisites, setPrerequisites] = useState<ProductPrerequisite[]>([])
   const [presets, setPresets] = useState<Preset[]>([])
+  const [extras, setExtras] = useState<Extra[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
   const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0 })
@@ -37,6 +40,8 @@ export default function App() {
   const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
   const [autoAdded, setAutoAdded] = useState<AutoAddedMap>({})
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
+  const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
+  const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
 
   const [toast, setToast] = useState<ToastState | null>(null)
 
@@ -74,6 +79,24 @@ export default function App() {
       .order('created_at')
     if (!error) setPresets(data || [])
   }
+
+  useEffect(() => { loadExtras() }, [])
+  const loadExtras = async () => {
+    const { data, error } = await supabase.from('extras').select('*, extra_items(*)').order('number')
+    if (!error) setExtras(data || [])
+  }
+
+  const toggleExtra = useCallback((extraId: string) => {
+    setSelectedExtras((prev) => { const next = new Set(prev); next.has(extraId) ? next.delete(extraId) : next.add(extraId); return next })
+  }, [])
+
+  const clearExtras = useCallback(() => setSelectedExtras(new Set()), [])
+
+  // Final BOM = rep's quantities with the ticked extras applied on top
+  const extrasResult = useMemo(
+    () => computeExtras(extras, selectedExtras, buildContext, quantities),
+    [extras, selectedExtras, buildContext, quantities],
+  )
 
   useEffect(() => { loadSettings() }, [])
   const loadSettings = async () => {
@@ -151,6 +174,8 @@ export default function App() {
       }
     }
 
+    setBuildContext(contextFromPreset(preset, configurationId))
+
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
@@ -168,13 +193,15 @@ export default function App() {
   useEffect(() => { if (view === 'quotes') loadQuotes() }, [view, loadQuotes])
 
   const saveQuote = async (formData: QuoteFormData): Promise<boolean> => {
-    const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
+    const finalQty = extrasResult.effectiveQty
+    const activeItems = products.filter((p) => (finalQty[p.id] ?? 0) > 0)
     if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
-    const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (quantities[p.id] ?? 0) : 0), 0)
+    const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
     const upliftPct = settings.hardware_uplift_pct
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
-    const labourMinutes = parseFloat(formData.labour_minutes) || 0
+    const labourMinutes = (parseFloat(formData.labour_minutes) || 0) + extrasResult.labourMinutes
+    const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0 }))
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
@@ -191,6 +218,7 @@ export default function App() {
       labour_minutes: labourMinutes,
       labour_rate_per_min: labourRate,
       labour_total: labourTotal,
+      extras: quoteExtras,
       status: 'draft',
     }).select().single()
 
@@ -205,8 +233,8 @@ export default function App() {
         description: p.description,
         part_number: p.part_number,
         factory_cost: p.factory_cost,
-        quantity: quantities[p.id],
-        line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
+        quantity: finalQty[p.id],
+        line_total: p.factory_cost != null ? p.factory_cost * finalQty[p.id] : null,
         variant_id: selectedVariantId,
         variant_label: selectedVariant?.label ?? null,
       }
@@ -220,6 +248,8 @@ export default function App() {
     setVariantSelections({})
     setAutoAdded({})
     setQuoteForm(DEFAULT_FORM)
+    setSelectedExtras(new Set())
+    setBuildContext(EMPTY_CONTEXT)
     return true
   }
 
@@ -251,7 +281,7 @@ export default function App() {
     setVariantSelections((prev) => ({ ...prev, [productId]: variantId }))
   }, [])
 
-  const activeCount = Object.values(quantities).filter((q) => q > 0).length
+  const activeCount = Object.values(extrasResult.effectiveQty).filter((q) => q > 0).length
 
   return (
     <>
@@ -267,6 +297,8 @@ export default function App() {
             onSave={saveQuote} showToast={showToast}
             presets={presets} onApplyPreset={applyPreset}
             settings={settings}
+            extras={extras} selectedExtras={selectedExtras} onToggleExtra={toggleExtra} onClearExtras={clearExtras}
+            extrasResult={extrasResult} buildContext={buildContext} setBuildContext={setBuildContext}
           />
         )}
         {view === 'quotes' && (
@@ -279,6 +311,7 @@ export default function App() {
             onRefreshProducts={loadProducts} onRefreshPresets={loadPresets}
             onRefreshSettings={loadSettings} onRefreshVariants={loadVariants}
             onRefreshPrerequisites={loadPrerequisites}
+            extras={extras} onRefreshExtras={loadExtras}
             showToast={showToast}
           />
         )}

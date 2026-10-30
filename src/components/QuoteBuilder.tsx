@@ -2,11 +2,13 @@ import { useState, useMemo } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset, PresetConfiguration,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
-  QuoteFormData, AppSettings,
+  QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial,
 } from '../types'
-import { CATEGORIES } from '../types'
+import { CATEGORIES, EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
+import type { ExtrasResult } from '../utils/extras'
+import { extraUnavailableReason, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
 
 interface Props {
   products: Product[]
@@ -25,6 +27,13 @@ interface Props {
   presets: Preset[]
   onApplyPreset: (preset: Preset, configurationId?: string) => void
   settings: AppSettings
+  extras: Extra[]
+  selectedExtras: Set<string>
+  onToggleExtra: (extraId: string) => void
+  onClearExtras: () => void
+  extrasResult: ExtrasResult
+  buildContext: BuildContext
+  setBuildContext: (ctx: BuildContext) => void
 }
 
 const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
@@ -322,11 +331,101 @@ function PresetsBar({ presets, products, onApply }: {
   )
 }
 
+// ── Extras panel ───────────────────────────────────────────────
+function ExtrasPanel({ extras, selected, onToggle, result, ctx, setCtx, productsById }: {
+  extras: Extra[]
+  selected: Set<string>
+  onToggle: (extraId: string) => void
+  result: ExtrasResult
+  ctx: BuildContext
+  setCtx: (ctx: BuildContext) => void
+  productsById: Record<string, Product>
+}) {
+  if (extras.length === 0) return null
+  const appliedById = Object.fromEntries(result.applied.map((a) => [a.extra.id, a]))
+  const labelStyle = { display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 } as const
+
+  return (
+    <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)' }}>Extras</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset — change if needed</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ flex: '1 1 120px' }}>
+          <label style={labelStyle}>Current rating</label>
+          <select className="input input-sm" value={ctx.rating ?? ''} onChange={(e) => setCtx({ ...ctx, rating: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Not set</option>
+            {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A</option>)}
+          </select>
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <label style={labelStyle}>Cabinet</label>
+          <select className="input input-sm" value={ctx.material ?? ''} onChange={(e) => setCtx({ ...ctx, material: (e.target.value || null) as CabinetMaterial | null })}>
+            <option value="">Not set</option>
+            {(Object.keys(MATERIAL_LABELS) as CabinetMaterial[]).map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: '1 1 100px' }}>
+          <label style={labelStyle}>Cabinet size</label>
+          <select className="input input-sm" value={ctx.size ?? ''} onChange={(e) => setCtx({ ...ctx, size: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Not set</option>
+            {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {extras.map((extra) => {
+          const reason = extraUnavailableReason(extra, ctx)
+          const isTicked = selected.has(extra.id)
+          const disabled = reason != null && !isTicked
+          const applied = appliedById[extra.id]
+          const lines = (applied?.lines ?? []).filter((l) => l.requested > 0)
+          return (
+            <div key={extra.id} style={{ padding: '8px 10px', border: `1.5px solid ${applied ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: applied ? 'var(--brand-light)' : 'transparent', opacity: disabled ? 0.5 : 1 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+                <input type="checkbox" checked={isTicked} disabled={disabled} onChange={() => onToggle(extra.id)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>
+                    <span style={{ color: 'var(--text-3)', marginRight: 6 }}>{extra.number}.</span>{extra.name}
+                    {Number(extra.labour_minutes) > 0 && <span style={{ fontSize: 12, color: 'var(--brand)', marginLeft: 8 }}>+{extra.labour_minutes} min labour</span>}
+                  </div>
+                  {extra.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{extra.description}</div>}
+                  {reason && <div style={{ fontSize: 12, color: isTicked ? 'var(--danger)' : 'var(--text-3)', marginTop: 2 }}>{isTicked ? `Not applied: ${reason}` : reason}</div>}
+                </div>
+              </label>
+              {lines.length > 0 && (
+                <div style={{ marginTop: 6, marginLeft: 26, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {lines.map((l, i) => {
+                    const prod = productsById[l.product_id]
+                    const name = prod ? `${prod.part_number ? `${prod.part_number} · ` : ''}${prod.description}` : 'Unknown product'
+                    const skipped = l.quantity === 0
+                    return (
+                      <div key={i} style={{ fontSize: 12, color: skipped ? 'var(--text-3)' : l.action === 'remove' ? 'var(--danger)' : 'var(--success)', textDecoration: skipped ? 'line-through' : 'none' }}>
+                        {l.action === 'remove' ? '−' : '+'}{l.requested} {name}
+                        {!skipped && prod?.factory_cost != null && <span style={{ color: 'var(--text-3)', marginLeft: 6 }}>{l.action === 'remove' ? '−' : ''}£{(prod.factory_cost * l.quantity).toFixed(2)}</span>}
+                        {skipped && <span style={{ textDecoration: 'none', marginLeft: 6 }}>({l.action === 'remove' ? 'not in BOM' : 'nothing to replace'})</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function QuoteBuilder({
   products, loading, variants, prerequisites, autoAdded,
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
+  extras, selectedExtras, onToggleExtra, onClearExtras, extrasResult, buildContext, setBuildContext,
 }: Props) {
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -372,15 +471,18 @@ export default function QuoteBuilder({
     return map
   }, [autoAdded, productsById])
 
+  // Extras-only parts are added through the Extras panel, not picked from the list
+  const catalogue = useMemo(() => products.filter((p) => p.category !== EXTRAS_CATEGORY), [products])
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return products
+    if (!search.trim()) return catalogue
     const q = search.toLowerCase()
-    return products.filter((p) =>
+    return catalogue.filter((p) =>
       p.description.toLowerCase().includes(q) ||
       (p.part_number ?? '').toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q),
     )
-  }, [products, search])
+  }, [catalogue, search])
 
   const byCategory = useMemo(() => {
     const map: Record<string, Product[]> = {}
@@ -389,7 +491,10 @@ export default function QuoteBuilder({
     return map
   }, [filtered])
 
-  const activeItems = products.filter((p) => (quantities[p.id] ?? 0) > 0)
+  // Quantities after extras — used for totals, PDF and save
+  const finalQty = extrasResult.effectiveQty
+  const extrasDelta = extrasResult.delta
+  const activeItems = products.filter((p) => (finalQty[p.id] ?? 0) > 0)
   const activeCount = activeItems.length
   const searchActive = search.trim().length > 0
 
@@ -398,17 +503,18 @@ export default function QuoteBuilder({
     return pvs && pvs.length > 0 && !variantSelections[p.id]
   })
 
-  const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (quantities[p.id] ?? 0) : 0), 0)
+  const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
   const upliftPct = settings.hardware_uplift_pct
   const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
-  const labourMinutes = parseFloat(quoteForm.labour_minutes) || 0
+  const extrasLabourMinutes = extrasResult.labourMinutes
+  const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
   const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
 
   const handleClear = () => {
     if (activeCount === 0) return
-    if (confirm('Clear all quantities?')) products.forEach((p) => setQty(p.id, 0))
+    if (confirm('Clear all quantities and extras?')) { products.forEach((p) => setQty(p.id, 0)); onClearExtras() }
   }
 
   const openSaveModal = () => {
@@ -436,11 +542,12 @@ export default function QuoteBuilder({
           description: p.description,
           part_number: getDisplayPartNumber(p, selectedVariant ?? null),
           factory_cost: p.factory_cost,
-          quantity: quantities[p.id],
-          line_total: p.factory_cost != null ? p.factory_cost * quantities[p.id] : null,
+          quantity: finalQty[p.id],
+          line_total: p.factory_cost != null ? p.factory_cost * finalQty[p.id] : null,
           variant_label: selectedVariant?.label ?? null,
         }
       }),
+      extras: extrasResult.applied.map(({ extra }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0 })),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, grandTotal,
       baseUrl: (import.meta as any).env.BASE_URL,
@@ -472,6 +579,17 @@ export default function QuoteBuilder({
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 8px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 99, fontSize: 10, fontWeight: 600, color: 'var(--success)', whiteSpace: 'nowrap' }}>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
         Auto-added via {parents.slice(0, 2).join(', ')}{parents.length > 2 ? ` +${parents.length - 2} more` : ''}
+      </div>
+    )
+  }
+
+  const renderExtrasNote = (p: Product) => {
+    const diff = extrasDelta[p.id]
+    if (!diff) return null
+    const removed = diff < 0
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, marginLeft: 4, padding: '2px 8px', background: removed ? 'var(--danger-bg)' : 'var(--brand-light)', border: `1px solid ${removed ? 'var(--danger)' : 'var(--brand)'}`, borderRadius: 99, fontSize: 10, fontWeight: 600, color: removed ? 'var(--danger)' : 'var(--brand)', whiteSpace: 'nowrap' }}>
+        {removed ? `${diff}` : `+${diff}`} via extras · {finalQty[p.id] ?? 0} on quote
       </div>
     )
   }
@@ -516,7 +634,7 @@ export default function QuoteBuilder({
 
   return (
     <>
-      <PresetsBar presets={presets} products={products} onApply={onApplyPreset} />
+      <PresetsBar presets={presets} products={catalogue} onApply={onApplyPreset} />
 
       {/* Quote info */}
       <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
@@ -549,6 +667,8 @@ export default function QuoteBuilder({
           </div>
         </div>
       </div>
+
+      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} />
 
       <div className="toolbar">
         <SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" />
@@ -597,7 +717,8 @@ export default function QuoteBuilder({
                     <tbody>
                       {items.map((p) => {
                         const qty = quantities[p.id] ?? 0
-                        const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
+                        const onQuote = finalQty[p.id] ?? 0
+                        const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
                         const isAutoAdded = autoAddedProductIds.has(p.id)
                         const selectedVariantId = variantSelections[p.id]
                         const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
@@ -608,6 +729,7 @@ export default function QuoteBuilder({
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
                               {renderAutoAddedNote(p)}
+                              {renderExtrasNote(p)}
                               {renderPrereqNote(p)}
                               {renderVariantDropdown(p)}
                             </td>
@@ -618,7 +740,7 @@ export default function QuoteBuilder({
                             </td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
                             <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div></td>
-                            <td className="right" style={{ fontWeight: qty > 0 ? 600 : 400 }}>{lineTotal != null ? fmt(lineTotal) : qty > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}</td>
+                            <td className="right" style={{ fontWeight: onQuote > 0 ? 600 : 400 }}>{lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}</td>
                           </tr>
                         )
                       })}
@@ -629,7 +751,8 @@ export default function QuoteBuilder({
                 <div className="product-cards">
                   {items.map((p) => {
                     const qty = quantities[p.id] ?? 0
-                    const lineTotal = p.factory_cost != null && qty > 0 ? p.factory_cost * qty : null
+                    const onQuote = finalQty[p.id] ?? 0
+                    const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
                     const isAutoAdded = autoAddedProductIds.has(p.id)
                     const selectedVariantId = variantSelections[p.id]
                     const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
@@ -641,6 +764,7 @@ export default function QuoteBuilder({
                             <div className="product-card-desc">{p.description}</div>
                             {displayPN && <span className="part-number" style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}>{displayPN}</span>}
                             {renderAutoAddedNote(p)}
+                            {renderExtrasNote(p)}
                           </div>
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div>
                         </div>
@@ -648,7 +772,7 @@ export default function QuoteBuilder({
                         {renderVariantDropdown(p, true)}
                         <div className="product-card-meta">
                           <span className="product-card-cost">{p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}<span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400, marginLeft: 4 }}>each</span></span>
-                          {qty > 0 && <span className="product-card-total">Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}</span>}
+                          {onQuote > 0 && <span className="product-card-total">Total: {lineTotal != null ? <strong>{fmt(lineTotal)}</strong> : <span className="cost-tbc">TBC</span>}</span>}
                         </div>
                       </div>
                     )
@@ -679,7 +803,7 @@ export default function QuoteBuilder({
             )}
             {labourTotal > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                <span style={{ color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min @ £{labourRate.toFixed(4)}/min)</span></span>
+                <span style={{ color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min{extrasLabourMinutes > 0 ? `, incl. ${extrasLabourMinutes} for extras` : ''} @ £{labourRate.toFixed(4)}/min)</span></span>
                 <span style={{ fontWeight: 500, color: 'var(--brand)' }}>£{labourTotal.toFixed(2)}</span>
               </div>
             )}

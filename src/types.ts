@@ -6,6 +6,7 @@ export type Category =
   | 'PEN Fault Protection'
   | 'Outgoing'
   | 'Ancillary Equipment'
+  | 'Extras'
 
 export const CATEGORIES: Category[] = [
   'Steelworks',
@@ -15,7 +16,11 @@ export const CATEGORIES: Category[] = [
   'PEN Fault Protection',
   'Outgoing',
   'Ancillary Equipment',
+  'Extras',
 ]
+
+// Products in this category are only added to a quote through an Extra
+export const EXTRAS_CATEGORY: Category = 'Extras'
 
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined'
 
@@ -65,6 +70,7 @@ export interface Quote {
   labour_rate_per_min: number
   labour_total: number
   status: QuoteStatus
+  extras?: QuoteExtra[] | null
   created_at: string
   updated_at: string
   quote_items?: QuoteItem[]
@@ -146,4 +152,47 @@ export interface QuoteFormData {
 export interface AppSettings {
   hardware_uplift_pct: number
   labour_rate_per_min: number
+}
+
+// ── Extras ─────────────────────────────────────────────────────
+export type CabinetMaterial = 'mild_steel' | 'stainless'
+
+export interface ExtraItem {
+  id: string
+  extra_id: string
+  product_id: string
+  action: 'add' | 'remove'
+  quantity: number
+  condition_rating: number | null
+  condition_size: number | null
+  only_if_removed: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface Extra {
+  id: string
+  number: number
+  name: string
+  description: string | null
+  is_enabled: boolean
+  labour_minutes: number
+  allowed_ratings: number[] | null
+  allowed_materials: CabinetMaterial[] | null
+  created_at: string
+  updated_at: string
+  extra_items?: ExtraItem[]
+}
+
+export interface QuoteExtra {
+  number: number
+  name: string
+  labour_minutes: number
+}
+
+// What the pillar is, used to decide which extras (and which extra lines) apply
+export interface BuildContext {
+  rating: number | null
+  material: CabinetMaterial | null
+  size: number | null
 }
