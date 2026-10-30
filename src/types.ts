@@ -71,6 +71,7 @@ export interface Quote {
   labour_total: number
   status: QuoteStatus
   extras?: QuoteExtra[] | null
+  build?: QuoteBuild | null
   created_at: string
   updated_at: string
   quote_items?: QuoteItem[]
@@ -147,6 +148,7 @@ export interface QuoteFormData {
   mo_number: string
   notes: string
   labour_minutes: string
+  uplift_pct: string   // blank = use the admin default
 }
 
 export interface AppSettings {
@@ -203,4 +205,17 @@ export interface BuildContext {
   rating: number | null
   material: CabinetMaterial | null
   size: number | null
+}
+
+// Everything needed to put a saved quote back into the builder. quote_items only
+// holds the final quantities after extras, so the rep's own quantities and the
+// ticked extras are kept here too.
+export interface QuoteBuild {
+  base_quantities: QuantityMap
+  variant_selections: VariantSelectionMap
+  auto_added: AutoAddedMap
+  selected_extras: string[]   // extra ids
+  extra_counts: ExtraCountMap
+  build_context: BuildContext
+  labour_minutes: string      // rep's minutes, before extras labour
 }

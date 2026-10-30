@@ -8,6 +8,7 @@ import { CATEGORIES, EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult } from '../utils/extras'
+import type { EditingQuote } from '../App'
 import { extraUnavailableReason, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
 
 interface Props {
@@ -22,7 +23,7 @@ interface Props {
   setVariantSelection: (productId: string, variantId: string) => void
   quoteForm: QuoteFormData
   setQuoteForm: (f: QuoteFormData) => void
-  onSave: (f: QuoteFormData) => Promise<boolean>
+  onSave: (f: QuoteFormData, asNew?: boolean) => Promise<boolean>
   showToast: (msg: string, type?: 'success' | 'error') => void
   presets: Preset[]
   onApplyPreset: (preset: Preset, configurationId?: string) => void
@@ -35,9 +36,13 @@ interface Props {
   extrasResult: ExtrasResult
   buildContext: BuildContext
   setBuildContext: (ctx: BuildContext) => void
+  editingQuote: EditingQuote | null
+  onCancelEdit: () => void
 }
 
 const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
+
+const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '' }
 
 function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
   if (!variant) return product.part_number
@@ -443,12 +448,13 @@ export default function QuoteBuilder({
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
+  editingQuote, onCancelEdit,
 }: Props) {
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
-  const [saveForm, setSaveForm] = useState<QuoteFormData>({ project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '' })
+  const [saveForm, setSaveForm] = useState<QuoteFormData>(EMPTY_FORM)
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => { const next = new Set(prev); next.has(cat) ? next.delete(cat) : next.add(cat); return next })
@@ -521,7 +527,8 @@ export default function QuoteBuilder({
   })
 
   const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
-  const upliftPct = settings.hardware_uplift_pct
+  const defaultUpliftPct = settings.hardware_uplift_pct
+  const upliftPct = quoteForm.uplift_pct.trim() === '' ? defaultUpliftPct : (parseFloat(quoteForm.uplift_pct) || 0)
   const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
   const extrasLabourMinutes = extrasResult.labourMinutes
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
@@ -540,12 +547,20 @@ export default function QuoteBuilder({
     setShowSaveModal(true)
   }
 
-  const handleSave = async () => {
+  const handleSave = async (asNew = false) => {
     if (!saveForm.project_name.trim()) { showToast('Project name is required', 'error'); return }
     setSaving(true)
-    const ok = await onSave(saveForm)
+    const ok = await onSave(saveForm, asNew)
     setSaving(false)
-    if (ok) { setShowSaveModal(false); setSaveForm({ project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '' }) }
+    if (ok) { setShowSaveModal(false); setSaveForm(EMPTY_FORM) }
+  }
+
+  const setUplift = (value: string) => {
+    if (value.trim() !== '') {
+      const n = parseFloat(value)
+      if (!isNaN(n) && (n < 0 || n > 100)) return
+    }
+    setQuoteForm({ ...quoteForm, uplift_pct: value })
   }
 
   const handlePdf = () => {
@@ -651,6 +666,13 @@ export default function QuoteBuilder({
 
   return (
     <>
+      {editingQuote && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '10px 14px', marginBottom: 16, background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--warning)', fontWeight: 500 }}>
+          <span>Editing saved quote: <strong>{editingQuote.project_name}</strong></span>
+          <button className="btn btn-sm" onClick={onCancelEdit}>Cancel edit</button>
+        </div>
+      )}
+
       <PresetsBar presets={presets} products={catalogue} onApply={onApplyPreset} />
 
       {/* Quote info */}
@@ -681,6 +703,23 @@ export default function QuoteBuilder({
                 <div style={{ height: 42, display: 'flex', alignItems: 'center', padding: '0 14px', background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', fontSize: 14, fontWeight: 600, color: 'var(--brand)', whiteSpace: 'nowrap' }}>£{labourTotal.toFixed(2)}</div>
               </div>
             )}
+          </div>
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>Hardware uplift</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Uplift (%)</label>
+              <input className="input" type="number" min="0" max="100" step="0.1" placeholder={String(defaultUpliftPct)} value={quoteForm.uplift_pct} onChange={(e) => setUplift(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
+            </div>
+            <div style={{ paddingBottom: 1, fontSize: 12, color: 'var(--text-3)', minHeight: 42, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {quoteForm.uplift_pct.trim() === ''
+                ? <span>Using the default {defaultUpliftPct}%</span>
+                : <>
+                    <span>Default is {defaultUpliftPct}%</span>
+                    <button className="btn btn-sm" onClick={() => setQuoteForm({ ...quoteForm, uplift_pct: '' })}>Use default</button>
+                  </>}
+            </div>
           </div>
         </div>
       </div>
@@ -843,7 +882,7 @@ export default function QuoteBuilder({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
             PDF
           </button>
-          <button className="btn btn-secondary" onClick={openSaveModal}>Save quote</button>
+          <button className="btn btn-secondary" onClick={openSaveModal}>{editingQuote ? 'Update quote' : 'Save quote'}</button>
         </div>
       </div>
 
@@ -851,7 +890,7 @@ export default function QuoteBuilder({
         <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="modal-handle" />
-            <h2 style={{ marginBottom: 4 }}>Save quote</h2>
+            <h2 style={{ marginBottom: 4 }}>{editingQuote ? 'Update quote' : 'Save quote'}</h2>
             <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 ? 10 : 20 }}>
               {activeCount} item{activeCount !== 1 ? 's' : ''} · £{grandTotal.toFixed(2)} total
             </p>
@@ -866,9 +905,10 @@ export default function QuoteBuilder({
               <input className="input" placeholder="MO number" value={saveForm.mo_number} onChange={(e) => setSaveForm({ ...saveForm, mo_number: e.target.value })} style={{ fontFamily: 'var(--mono)' }} />
               <input className="input" placeholder="Notes (optional)" value={saveForm.notes} onChange={(e) => setSaveForm({ ...saveForm, notes: e.target.value })} />
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button className="btn" onClick={() => setShowSaveModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save quote'}</button>
+              {editingQuote && <button className="btn" onClick={() => handleSave(true)} disabled={saving}>Save as new quote</button>}
+              <button className="btn btn-primary" onClick={() => handleSave()} disabled={saving}>{saving ? 'Saving…' : editingQuote ? 'Update quote' : 'Save quote'}</button>
             </div>
           </div>
         </div>
