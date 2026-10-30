@@ -78,11 +78,16 @@ create policy "Admin can do everything on extra items" on extra_items for all
   to authenticated using (true) with check (true);
 
 -- ── 4. Parts used by extras ─────────────────────────────────
+-- Fixes for anyone who ran an earlier version of this script
+update products set part_number = 'BSRG3123' where part_number = 'SRG3123' and category = 'Extras';
+update extra_items set only_if_removed = false
+where extra_id in (select id from extras where number = 5);
+
 -- Added to the "Extras" category only if that part number isn't already in
 -- the catalogue. Existing parts keep their category; their price is only
 -- filled in if it is currently blank. Rename descriptions in Admin later.
 with new_parts(part_number, description, factory_cost) as (values
-  ('SRG3123',            'Type 1 surge protection device',         61.41),
+  ('BSRG3123',           'Type 1 surge protection device',         61.41),
   ('BFD22581',           'Fuse (BFD22581)',                         3.54),
   ('BF063A',             'BF063A (description to follow)',          0.92),
   ('LCR1703',            'Open PEN fault protection (LCR1703)',   320.00),
@@ -114,7 +119,7 @@ where not exists (
 );
 
 update products p set factory_cost = v.cost
-from (values ('SRG3123',61.41),('BFD22581',3.54),('BF063A',0.92),('LCR1703',320.00),
+from (values ('BSRG3123',61.41),('BFD22581',3.54),('BF063A',0.92),('LCR1703',320.00),
              ('LCR1727',19.92),('LCR1728',4.40),('E10-3C06',6.13),('LCR1704',150.00),
              ('B100/30/2B',28.82),('BRCBO10-16/30/1MBA',12.60),('P579831',6.40),
              ('BE10-1B06',1.45),('LCR1770',49.61),('LCR1771',8.28),('BIC63/4',5.98),
@@ -159,7 +164,7 @@ lines(extra_no, pn, action, qty, cond_rating, cond_size, only_if_removed, sort_o
   (2,  'SRG3V1G',            'remove', 1, null::int, null::int, false, 10),
   (2,  'B100/30/2A',         'remove', 1, null, null, false, 20),
   (2,  'B100/30/2B',         'remove', 1, null, null, false, 30),
-  (2,  'SRG3123',            'add',    1, null, null, false, 40),
+  (2,  'BSRG3123',           'add',    1, null, null, false, 40),
   (2,  'BFD22581',           'add',    3, null, null, false, 50),
   (2,  'BF063A',             'add',    1, null, null, false, 60),
   -- 4: Open PEN fault protection (100A / 125A only)
@@ -169,9 +174,9 @@ lines(extra_no, pn, action, qty, cond_rating, cond_size, only_if_removed, sort_o
   (4,  'E10-3C06',           'add',    1, null, null, false, 40),
   (4,  'LCR1704',            'add',    1, 100,  null, false, 50),
   (4,  'LCR1704',            'add',    2, 125,  null, false, 60),
-  -- 5: Type B RCD — swap 2A RCCB for 2B
+  -- 5: Type B RCD — swap 2A RCCB for 2B (2B still added if extra 2 already took the RCCB out)
   (5,  'B100/30/2A',         'remove', 1, null, null, false, 10),
-  (5,  'B100/30/2B',         'add',    1, null, null, true,  20),
+  (5,  'B100/30/2B',         'add',    1, null, null, false, 20),
   -- 6: 13A RCBO socket
   (6,  'BRCBO10-16/30/1MBA', 'add',    1, null, null, false, 10),
   (6,  'P579831',            'add',    1, null, null, false, 20),
