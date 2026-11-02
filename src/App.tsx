@@ -9,6 +9,7 @@ import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
+import StepBuilder from './components/StepBuilder'
 import SavedQuotes from './components/SavedQuotes'
 import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
@@ -47,6 +48,17 @@ export default function App() {
   const [extraCounts, setExtraCounts] = useState<ExtraCountMap>({})
   const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
   const [editingQuote, setEditingQuote] = useState<EditingQuote | null>(null)
+
+  // Step-by-step page instead of the full builder (remembered on this device)
+  const [stepMode, setStepMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('builder_mode') === 'steps' } catch { return false }
+  })
+  const toggleStepMode = () => {
+    const next = !stepMode
+    setStepMode(next)
+    try { localStorage.setItem('builder_mode', next ? 'steps' : 'full') } catch { /* private window etc. */ }
+    setView('builder')
+  }
 
   const [toast, setToast] = useState<ToastState | null>(null)
 
@@ -401,23 +413,39 @@ export default function App() {
 
   return (
     <>
-      <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} />
+      <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} />
       <main className="main">
-        {view === 'builder' && (
-          <QuoteBuilder
-            products={products} loading={productsLoading}
-            variants={variants} prerequisites={prerequisites} autoAdded={autoAdded}
-            quantities={quantities} setQty={setQty}
-            variantSelections={variantSelections} setVariantSelection={setVariantSelection}
-            quoteForm={quoteForm} setQuoteForm={setQuoteForm}
-            onSave={saveQuote} showToast={showToast}
-            presets={presets} onApplyPreset={applyPreset}
-            settings={settings}
-            extras={extras} selectedExtras={selectedExtras} onToggleExtra={toggleExtra} onSetExtraCount={setExtraCount} onClearExtras={clearExtras}
-            extrasResult={extrasResult} buildContext={buildContext} setBuildContext={setBuildContext}
-            editingQuote={editingQuote} onCancelEdit={cancelEdit}
-          />
-        )}
+        {view === 'builder' && (() => {
+          const builderProps = {
+            products,
+            loading: productsLoading,
+            variants,
+            prerequisites,
+            autoAdded,
+            quantities,
+            setQty,
+            variantSelections,
+            setVariantSelection,
+            quoteForm,
+            setQuoteForm,
+            onSave: saveQuote,
+            showToast,
+            presets,
+            onApplyPreset: applyPreset,
+            settings,
+            extras,
+            selectedExtras,
+            onToggleExtra: toggleExtra,
+            onSetExtraCount: setExtraCount,
+            onClearExtras: clearExtras,
+            extrasResult,
+            buildContext,
+            setBuildContext,
+            editingQuote,
+            onCancelEdit: cancelEdit,
+          }
+          return stepMode ? <StepBuilder {...builderProps} /> : <QuoteBuilder {...builderProps} />
+        })()}
         {view === 'quotes' && (
           <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} onEdit={editQuote} isAdmin={isAdmin} />
         )}

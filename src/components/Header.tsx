@@ -7,9 +7,11 @@ interface Props {
   onAdminNav: () => void
   onLogout: () => void
   activeCount: number
+  stepMode: boolean
+  onToggleStepMode: () => void
 }
 
-export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, activeCount }: Props) {
+export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, activeCount, stepMode, onToggleStepMode }: Props) {
   const logoSrc = `${(import.meta as any).env.BASE_URL}logo.png`
 
   return (
@@ -27,7 +29,21 @@ export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, a
         </div>
       </div>
 
-      <nav className="header-nav">
+      {/* Switches the quote builder between the full list and the step-by-step page */}
+      <button
+        onClick={onToggleStepMode}
+        title={stepMode ? 'Switch back to the full quote builder' : 'Build the quote section by section'}
+        aria-pressed={stepMode}
+        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px 0 8px', borderRadius: 99, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', border: `1px solid ${stepMode ? 'var(--secondary)' : 'rgba(255,255,255,0.25)'}`, background: stepMode ? 'rgba(255,204,0,0.15)' : 'rgba(255,255,255,0.08)', color: '#fff' }}
+      >
+        <span style={{ position: 'relative', width: 30, height: 18, borderRadius: 99, background: stepMode ? 'var(--secondary)' : 'rgba(255,255,255,0.3)', transition: 'background 0.15s', flexShrink: 0 }}>
+          <span style={{ position: 'absolute', top: 2, left: stepMode ? 14 : 2, width: 14, height: 14, borderRadius: 99, background: '#fff', transition: 'left 0.15s' }} />
+        </span>
+        <span className="hide-mobile">Step-by-step</span>
+        <span className="show-mobile">Steps</span>
+      </button>
+
+      <nav className="header-nav" style={{ marginLeft: 8 }}>
         <button className={`header-nav-item ${view === 'builder' ? 'active' : ''}`} onClick={() => setView('builder')}>
           {activeCount > 0 ? `Quote builder (${activeCount})` : 'Quote builder'}
         </button>

@@ -7,7 +7,7 @@ import type {
 import { CATEGORIES, EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
-import type { ExtrasResult } from '../utils/extras'
+import type { ExtrasResult, AppliedExtra } from '../utils/extras'
 import type { EditingQuote } from '../App'
 import { extraUnavailableReason, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
 
@@ -40,17 +40,17 @@ interface Props {
   onCancelEdit: () => void
 }
 
-const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
+export const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
 
 const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '' }
 
-function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
+export function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
   if (!variant) return product.part_number
   if (!variant.part_number_suffix) return product.part_number
   return product.part_number ? `${product.part_number}${variant.part_number_suffix}` : variant.part_number_suffix
 }
 
-function Stepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+export function Stepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
     <div className="stepper">
       <button className="stepper-btn" onPointerDown={(e) => { e.preventDefault(); onChange(Math.max(0, value - 1)) }} aria-label="Decrease">−</button>
@@ -238,7 +238,7 @@ function PresetModal({ preset, products, onApply, onClose }: {
 }
 
 // ── Presets bar ────────────────────────────────────────────────
-function PresetsBar({ presets, products, onApply }: {
+export function PresetsBar({ presets, products, onApply }: {
   presets: Preset[]
   products: Product[]
   onApply: (preset: Preset, configId?: string) => void
@@ -337,6 +337,97 @@ function PresetsBar({ presets, products, onApply }: {
   )
 }
 
+// ── One extra as a tick box (used by the Extras panel and the step-by-step builder) ──
+export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, productsById }: {
+  extra: Extra
+  ctx: BuildContext
+  isTicked: boolean
+  applied: AppliedExtra | undefined
+  onToggle: (extraId: string) => void
+  onSetCount: (extraId: string, count: number) => void
+  productsById: Record<string, Product>
+}) {
+  const reason = extraUnavailableReason(extra, ctx)
+  const disabled = reason != null && !isTicked
+  const lines = (applied?.lines ?? []).filter((l) => l.requested > 0)
+  return (
+    <div style={{ padding: '8px 10px', border: `1.5px solid ${applied ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: applied ? 'var(--brand-light)' : 'transparent', opacity: disabled ? 0.5 : 1 }}>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+        <input type="checkbox" checked={isTicked} disabled={disabled} onChange={() => onToggle(extra.id)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>
+            <span style={{ color: 'var(--text-3)', marginRight: 6 }}>{extra.number}.</span>{extra.name}
+            {Number(extra.labour_minutes) > 0 && <span style={{ fontSize: 12, color: 'var(--brand)', marginLeft: 8 }}>+{extra.labour_minutes} min labour</span>}
+          </div>
+          {extra.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{extra.description}</div>}
+          {reason && <div style={{ fontSize: 12, color: isTicked ? 'var(--danger)' : 'var(--text-3)', marginTop: 2 }}>{isTicked ? `Not applied: ${reason}` : reason}</div>}
+        </div>
+      </label>
+      {applied && extra.scales_with_bom && (() => {
+        const max = applied.maxCount
+        const btn = (enabled: boolean) => ({ width: 28, height: 28, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border-strong)', background: 'var(--surface)', fontSize: 16, lineHeight: 1, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.35 })
+        const canDown = applied.count > 0
+        const canUp = max == null || applied.count < max
+        return (
+          <div style={{ marginTop: 8, marginLeft: 26, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{max != null ? 'Replace' : 'Quantity'}</span>
+            <button type="button" style={btn(canDown)} disabled={!canDown} onClick={() => onSetCount(extra.id, applied.count - 1)} aria-label="Fewer">−</button>
+            <span style={{ minWidth: 24, textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14 }}>{applied.count}</span>
+            <button type="button" style={btn(canUp)} disabled={!canUp} onClick={() => onSetCount(extra.id, applied.count + 1)} aria-label="More">+</button>
+            {max != null && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>of {max} in the BOM</span>}
+          </div>
+        )
+      })()}
+      {lines.length > 0 && (
+        <div style={{ marginTop: 6, marginLeft: 26, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {lines.map((l, i) => {
+            const prod = productsById[l.product_id]
+            const name = prod ? `${prod.part_number ? `${prod.part_number} · ` : ''}${prod.description}` : 'Unknown product'
+            const skipped = l.quantity === 0
+            return (
+              <div key={i} style={{ fontSize: 12, color: skipped ? 'var(--text-3)' : l.action === 'remove' ? 'var(--danger)' : 'var(--success)', textDecoration: skipped ? 'line-through' : 'none' }}>
+                {l.action === 'remove' ? '−' : '+'}{l.requested} {name}
+                {!skipped && prod?.factory_cost != null && <span style={{ color: 'var(--text-3)', marginLeft: 6 }}>{l.action === 'remove' ? '−' : ''}£{(prod.factory_cost * l.quantity).toFixed(2)}</span>}
+                {skipped && <span style={{ textDecoration: 'none', marginLeft: 6 }}>({l.action === 'remove' ? 'not in BOM' : 'nothing to replace'})</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Current rating / cabinet / size pickers (decide which extras apply) ──
+export function BuildContextFields({ ctx, setCtx }: { ctx: BuildContext; setCtx: (ctx: BuildContext) => void }) {
+  const labelStyle = { display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 } as const
+  return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ flex: '1 1 120px' }}>
+        <label style={labelStyle}>Current rating</label>
+        <select className="input input-sm" value={ctx.rating ?? ''} onChange={(e) => setCtx({ ...ctx, rating: e.target.value ? Number(e.target.value) : null })}>
+          <option value="">Not set</option>
+          {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A</option>)}
+        </select>
+      </div>
+      <div style={{ flex: '1 1 160px' }}>
+        <label style={labelStyle}>Cabinet</label>
+        <select className="input input-sm" value={ctx.material ?? ''} onChange={(e) => setCtx({ ...ctx, material: (e.target.value || null) as CabinetMaterial | null })}>
+          <option value="">Not set</option>
+          {(Object.keys(MATERIAL_LABELS) as CabinetMaterial[]).map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
+        </select>
+      </div>
+      <div style={{ flex: '1 1 100px' }}>
+        <label style={labelStyle}>Cabinet size</label>
+        <select className="input input-sm" value={ctx.size ?? ''} onChange={(e) => setCtx({ ...ctx, size: e.target.value ? Number(e.target.value) : null })}>
+          <option value="">Not set</option>
+          {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n}</option>)}
+        </select>
+      </div>
+    </div>
+  )
+}
+
 // ── Extras panel ───────────────────────────────────────────────
 function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setCtx, productsById }: {
   extras: Extra[]
@@ -350,8 +441,6 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setC
 }) {
   if (extras.length === 0) return null
   const appliedById = Object.fromEntries(result.applied.map((a) => [a.extra.id, a]))
-  const labelStyle = { display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 } as const
-
   return (
     <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -359,83 +448,11 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setC
         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset — change if needed</div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-        <div style={{ flex: '1 1 120px' }}>
-          <label style={labelStyle}>Current rating</label>
-          <select className="input input-sm" value={ctx.rating ?? ''} onChange={(e) => setCtx({ ...ctx, rating: e.target.value ? Number(e.target.value) : null })}>
-            <option value="">Not set</option>
-            {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A</option>)}
-          </select>
-        </div>
-        <div style={{ flex: '1 1 160px' }}>
-          <label style={labelStyle}>Cabinet</label>
-          <select className="input input-sm" value={ctx.material ?? ''} onChange={(e) => setCtx({ ...ctx, material: (e.target.value || null) as CabinetMaterial | null })}>
-            <option value="">Not set</option>
-            {(Object.keys(MATERIAL_LABELS) as CabinetMaterial[]).map((m) => <option key={m} value={m}>{MATERIAL_LABELS[m]}</option>)}
-          </select>
-        </div>
-        <div style={{ flex: '1 1 100px' }}>
-          <label style={labelStyle}>Cabinet size</label>
-          <select className="input input-sm" value={ctx.size ?? ''} onChange={(e) => setCtx({ ...ctx, size: e.target.value ? Number(e.target.value) : null })}>
-            <option value="">Not set</option>
-            {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n}</option>)}
-          </select>
-        </div>
-      </div>
+      <div style={{ marginBottom: 12 }}><BuildContextFields ctx={ctx} setCtx={setCtx} /></div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {extras.map((extra) => {
-          const reason = extraUnavailableReason(extra, ctx)
-          const isTicked = selected.has(extra.id)
-          const disabled = reason != null && !isTicked
-          const applied = appliedById[extra.id]
-          const lines = (applied?.lines ?? []).filter((l) => l.requested > 0)
-          return (
-            <div key={extra.id} style={{ padding: '8px 10px', border: `1.5px solid ${applied ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: applied ? 'var(--brand-light)' : 'transparent', opacity: disabled ? 0.5 : 1 }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer' }}>
-                <input type="checkbox" checked={isTicked} disabled={disabled} onChange={() => onToggle(extra.id)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>
-                    <span style={{ color: 'var(--text-3)', marginRight: 6 }}>{extra.number}.</span>{extra.name}
-                    {Number(extra.labour_minutes) > 0 && <span style={{ fontSize: 12, color: 'var(--brand)', marginLeft: 8 }}>+{extra.labour_minutes} min labour</span>}
-                  </div>
-                  {extra.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{extra.description}</div>}
-                  {reason && <div style={{ fontSize: 12, color: isTicked ? 'var(--danger)' : 'var(--text-3)', marginTop: 2 }}>{isTicked ? `Not applied: ${reason}` : reason}</div>}
-                </div>
-              </label>
-              {applied && extra.scales_with_bom && (() => {
-                const max = applied.maxCount
-                const btn = (enabled: boolean) => ({ width: 28, height: 28, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border-strong)', background: 'var(--surface)', fontSize: 16, lineHeight: 1, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.35 })
-                const canDown = applied.count > 0
-                const canUp = max == null || applied.count < max
-                return (
-                  <div style={{ marginTop: 8, marginLeft: 26, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{max != null ? 'Replace' : 'Quantity'}</span>
-                    <button type="button" style={btn(canDown)} disabled={!canDown} onClick={() => onSetCount(extra.id, applied.count - 1)} aria-label="Fewer">−</button>
-                    <span style={{ minWidth: 24, textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 14 }}>{applied.count}</span>
-                    <button type="button" style={btn(canUp)} disabled={!canUp} onClick={() => onSetCount(extra.id, applied.count + 1)} aria-label="More">+</button>
-                    {max != null && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>of {max} in the BOM</span>}
-                  </div>
-                )
-              })()}
-              {lines.length > 0 && (
-                <div style={{ marginTop: 6, marginLeft: 26, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {lines.map((l, i) => {
-                    const prod = productsById[l.product_id]
-                    const name = prod ? `${prod.part_number ? `${prod.part_number} · ` : ''}${prod.description}` : 'Unknown product'
-                    const skipped = l.quantity === 0
-                    return (
-                      <div key={i} style={{ fontSize: 12, color: skipped ? 'var(--text-3)' : l.action === 'remove' ? 'var(--danger)' : 'var(--success)', textDecoration: skipped ? 'line-through' : 'none' }}>
-                        {l.action === 'remove' ? '−' : '+'}{l.requested} {name}
-                        {!skipped && prod?.factory_cost != null && <span style={{ color: 'var(--text-3)', marginLeft: 6 }}>{l.action === 'remove' ? '−' : ''}£{(prod.factory_cost * l.quantity).toFixed(2)}</span>}
-                        {skipped && <span style={{ textDecoration: 'none', marginLeft: 6 }}>({l.action === 'remove' ? 'not in BOM' : 'nothing to replace'})</span>}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )
+          return <ExtraRow key={extra.id} extra={extra} ctx={ctx} isTicked={selected.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggle} onSetCount={onSetCount} productsById={productsById} />
         })}
       </div>
     </div>
