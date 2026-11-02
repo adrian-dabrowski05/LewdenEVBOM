@@ -259,7 +259,11 @@ export default function App() {
       ? await supabase.from('quotes').update(quoteRow).eq('id', editingQuote.id).select().single()
       : await supabase.from('quotes').insert({ ...quoteRow, status: 'draft' }).select().single()
 
-    if (quoteError || !quoteData) { showToast(updating ? 'Failed to update quote' : 'Failed to save quote', 'error'); return false }
+    if (quoteError || !quoteData) {
+      console.error('Saving quote failed', quoteError)
+      showToast(`${updating ? 'Failed to update quote' : 'Failed to save quote'}${quoteError ? `: ${quoteError.message}` : ''}`, 'error')
+      return false
+    }
 
     const itemsToInsert = activeItems.map((p) => {
       const selectedVariantId = variantSelections[p.id] ?? null
@@ -277,14 +281,28 @@ export default function App() {
       }
     })
 
-    const { data: newItems, error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert).select('id')
-    if (itemsError) { showToast(updating ? 'Quote updated but items failed to save — the old items were kept' : 'Quote saved but items failed to save', 'error'); return false }
+    // Note the old lines before adding the new ones, so only those get removed afterwards
+    let oldItemIds: string[] = []
+    if (updating) {
+      const { data: oldItems } = await supabase.from('quote_items').select('id').eq('quote_id', quoteData.id)
+      oldItemIds = (oldItems ?? []).map((i) => i.id)
+    }
+
+    const { error: itemsError } = await supabase.from('quote_items').insert(itemsToInsert)
+    if (itemsError) {
+      console.error('Saving quote items failed', itemsError)
+      showToast(`${updating ? 'Quote updated but items failed to save — the old items were kept' : 'Quote saved but items failed to save'}: ${itemsError.message}`, 'error')
+      return false
+    }
 
     // New lines are in, so the old ones can go (if this fails the quote still has its old lines too)
-    if (updating) {
-      const keep = (newItems ?? []).map((i) => i.id)
-      const { error: deleteError } = await supabase.from('quote_items').delete().eq('quote_id', quoteData.id).not('id', 'in', `(${keep.join(',')})`)
-      if (deleteError) { showToast('Quote updated but old items could not be removed', 'error'); return false }
+    if (oldItemIds.length > 0) {
+      const { error: deleteError } = await supabase.from('quote_items').delete().in('id', oldItemIds)
+      if (deleteError) {
+        console.error('Removing old quote items failed', deleteError)
+        showToast(`Quote updated but old items could not be removed: ${deleteError.message}`, 'error')
+        return false
+      }
     }
 
     showToast(updating ? 'Quote updated' : 'Quote saved successfully')
