@@ -1,5 +1,5 @@
 import type { Quote, QuoteExtra } from '../types'
-import { quotePricing } from './pricing'
+import { savedQuotePricing } from './pricing'
 import type { QuotePricing } from './pricing'
 
 interface PrintItem {
@@ -70,7 +70,8 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     </tr>
   `).join('')
 
-  const carriage = Number(opts.carriage) || 0
+  // Carriage: no profit or rebate on it, added after the rebate
+  const carriage = pricing.carriage
   const carriageRow = carriage > 0 ? `
     <tr class="summary-row">
       <td colspan="4" class="right label">Carriage</td>
@@ -202,7 +203,6 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
       ${upliftRow}
       ${labourRow}
       ${extraCostRows}
-      ${carriageRow}
       <tr class="summary-row subtotal-row">
         <td colspan="4" class="right bold">Factory cost</td>
         <td class="right bold">£${pricing.factoryCost.toFixed(2)}</td>
@@ -219,6 +219,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
         <td colspan="4" class="right label">Rebate (${pricing.rebatePct}%)</td>
         <td class="right">−£${pricing.rebateAmount.toFixed(2)}</td>
       </tr>
+      ${carriageRow}
       <tr class="total-row">
         <td colspan="4" class="right">Total quote</td>
         <td class="right">£${pricing.totalQuote.toFixed(2)}</td>
@@ -298,7 +299,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
     labourRatePerMin: quote.labour_rate_per_min ?? 0,
     labourTotal: quote.labour_total ?? 0,
     carriage: Number(quote.carriage) || 0,
-    pricing: quotePricing(Number(quote.grand_total) || 0, quote.gross_profit_pct, quote.rebate_pct),
+    pricing: savedQuotePricing(quote),
     baseUrl,
     extras: quote.extras ?? [],
   })
