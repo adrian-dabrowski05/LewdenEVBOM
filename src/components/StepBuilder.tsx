@@ -63,7 +63,6 @@ const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
 const STEEL_STEPS: { key: SteelKey; label: string; hint: string }[] = [
   { key: 'material', label: 'Material', hint: 'Pick the cabinet and its colour (the variant). Start from a preset if you like, and set the rating, material and size so the right extras are offered.' },
   { key: 'internals', label: 'Internals', hint: 'Gear trays, mounting plates, brackets and DIN rail.' },
-  { key: 'gasket', label: 'Rubber gasket', hint: 'Door seals and gaskets.' },
   { key: 'label', label: 'Danger label', hint: 'Danger and warning labels.' },
   { key: 'root', label: 'Root', hint: 'The root (base) the pillar stands in.' },
   { key: 'other', label: 'Other steelwork', hint: 'Steelwork parts that did not fit one of the steps above.' },
@@ -72,6 +71,8 @@ const STEEL_STEPS: { key: SteelKey; label: string; hint: string }[] = [
 // Steelwork parts are sorted into steps by words in their description, part number
 // or notes. Checked in this order, so "Stainless root" lands in Root, not Material.
 const STEEL_RULES: [SteelKey, RegExp][] = [
+  // Gaskets are prerequisites of the cabinets, so they have no step of their own:
+  // they are caught here and not listed (they still show on the Review page)
   ['gasket', /gasket|rubber|seal/i],
   ['label', /label|danger|warning|sticker|sign\b/i],
   ['root', /\broots?\b|plinth|ground|buried|base frame/i],
