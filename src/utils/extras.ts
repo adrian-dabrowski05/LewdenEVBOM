@@ -6,7 +6,7 @@ export const MATERIAL_LABELS: Record<CabinetMaterial, string> = {
 }
 
 export const RATING_OPTIONS = [100, 125, 200, 400, 630]
-export const SIZE_OPTIONS = [1, 2, 3]
+export const SIZE_OPTIONS = [1, 2, 3, 4]
 
 export const EMPTY_CONTEXT: BuildContext = { rating: null, material: null, size: null }
 
