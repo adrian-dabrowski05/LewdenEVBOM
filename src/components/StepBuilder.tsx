@@ -8,8 +8,9 @@ import { EXTRAS_CATEGORY } from '../types'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult } from '../utils/extras'
 import { toQuoteExtras } from '../utils/extras'
+import { quotePricing } from '../utils/pricing'
 import type { EditingQuote } from '../App'
-import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner } from './QuoteBuilder'
+import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows } from './QuoteBuilder'
 
 // Step-by-step quote builder. Uses the same BOM, extras and quote details as the
 // full Quote builder, so a rep can switch between the two at any time.
@@ -241,7 +242,8 @@ export default function StepBuilder({
   // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
   const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct)
 
   const missingVariants = activeItems.filter((p) => (variantsByProduct[p.id]?.length ?? 0) > 0 && !variantSelections[p.id])
 
@@ -328,7 +330,7 @@ export default function StepBuilder({
       }),
       extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
-      labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, grandTotal,
+      labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, pricing,
       baseUrl: (import.meta as any).env.BASE_URL,
     })
   }
@@ -512,7 +514,13 @@ export default function StepBuilder({
           </div>
           {costedExtras.map(({ extra, cost }) => <div key={extra.id} style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>{extra.name}</span><span style={{ fontWeight: 500 }}>£{cost.toFixed(2)}</span></div>)}
           {carriage > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>Carriage</span><span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span></div>}
-          <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700 }}><span>Grand total</span><span>£{grandTotal.toFixed(2)}</span></div>
+          <ProfitRebateRows
+            pricing={pricing}
+            gpValue={quoteForm.gp_pct}
+            rebateValue={quoteForm.rebate_pct}
+            onGpChange={(v) => setQuoteForm({ ...quoteForm, gp_pct: v })}
+            onRebateChange={(v) => setQuoteForm({ ...quoteForm, rebate_pct: v })}
+          />
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 16 }}>
           <button className="btn" onClick={handlePdf}>PDF</button>
@@ -604,8 +612,9 @@ export default function StepBuilder({
 
       <div className="total-bar" style={{ marginTop: 20 }}>
         <div>
-          <div className="total-bar-label">Grand total</div>
-          <div className="total-bar-amount">£{grandTotal.toFixed(2)}</div>
+          <div className="total-bar-label">Total quote</div>
+          <div className="total-bar-amount">£{pricing.totalQuote.toFixed(2)}</div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 2 }}>Factory cost £{factoryCost.toFixed(2)}</div>
           {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
         </div>
         <div className="total-bar-actions">

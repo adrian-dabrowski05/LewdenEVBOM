@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import type { CSSProperties } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset, PresetConfiguration,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
@@ -9,6 +10,8 @@ import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult, AppliedExtra } from '../utils/extras'
 import type { EditingQuote } from '../App'
+import { quotePricing, pctInputOk, MAX_GP_PCT, GP_MODE } from '../utils/pricing'
+import type { QuotePricing } from '../utils/pricing'
 import { extraUnavailableReason, toQuoteExtras, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
 
 interface Props {
@@ -48,7 +51,7 @@ interface Props {
 
 export const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
 
-const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '' }
+const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '', gp_pct: '', rebate_pct: '' }
 
 export function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
   if (!variant) return product.part_number
@@ -528,6 +531,54 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost,
   )
 }
 
+// ── Factory cost → gross profit → quote price → rebate → total quote ──
+// Shared by the full builder and the step-by-step builder (bottom of the cost breakdown).
+export function ProfitRebateRows({ pricing, gpValue, rebateValue, onGpChange, onRebateChange }: {
+  pricing: QuotePricing
+  gpValue: string
+  rebateValue: string
+  onGpChange: (value: string) => void
+  onRebateChange: (value: string) => void
+}) {
+  const row: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 14 }
+  const pctBox = (value: string, onChange: (v: string) => void, max: number, label: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <input className="input input-sm" type="number" min="0" max={max} step="0.1" placeholder="0" aria-label={label}
+        value={value} onChange={(e) => onChange(e.target.value)}
+        style={{ width: 80, fontFamily: 'var(--mono)', textAlign: 'right' }} />
+      <span style={{ color: 'var(--text-3)', fontSize: 13 }}>%</span>
+    </span>
+  )
+  return (
+    <>
+      <div style={{ ...row, borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, fontSize: 16, fontWeight: 700 }}>
+        <span>Factory cost</span><span>£{pricing.factoryCost.toFixed(2)}</span>
+      </div>
+      <div style={row}>
+        <span style={{ color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          Gross profit {pctBox(gpValue, (v) => { if (pctInputOk(v, MAX_GP_PCT)) onGpChange(v) }, MAX_GP_PCT, 'Gross profit percentage')}
+        </span>
+        <span style={{ fontWeight: 500, color: 'var(--success)' }}>+£{pricing.grossProfit.toFixed(2)}</span>
+      </div>
+      <div style={{ ...row, fontSize: 15, fontWeight: 600 }}>
+        <span>Quote price</span><span>£{pricing.quotePrice.toFixed(2)}</span>
+      </div>
+      <div style={row}>
+        <span style={{ color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          Rebate {pctBox(rebateValue, (v) => { if (pctInputOk(v, 100)) onRebateChange(v) }, 100, 'Rebate percentage')}
+        </span>
+        <span style={{ fontWeight: 500, color: 'var(--danger)' }}>−£{pricing.rebateAmount.toFixed(2)}</span>
+      </div>
+      <div style={{ ...row, borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, fontSize: 17, fontWeight: 700, color: 'var(--brand)' }}>
+        <span>Total quote</span><span>£{pricing.totalQuote.toFixed(2)}</span>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        {GP_MODE === 'margin' ? 'Gross profit is a margin: it is that % of the quote price.' : 'Gross profit is a markup: it is that % of the factory cost.'} Rebate comes off the quote price.
+      </div>
+    </>
+  )
+}
+
 export default function QuoteBuilder({
   products, loading, variants, prerequisites, autoAdded,
   quantities, setQty, variantSelections, setVariantSelection,
@@ -626,7 +677,8 @@ export default function QuoteBuilder({
   // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
   const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct)
 
   const handleClear = () => {
     if (activeCount === 0) return
@@ -681,7 +733,7 @@ export default function QuoteBuilder({
       }),
       extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
-      labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, grandTotal,
+      labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, pricing,
       baseUrl: (import.meta as any).env.BASE_URL,
     })
   }
@@ -1005,17 +1057,22 @@ export default function QuoteBuilder({
                 <span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span>
               </div>
             )}
-            <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700 }}>
-              <span>Grand total</span><span>£{grandTotal.toFixed(2)}</span>
-            </div>
+            <ProfitRebateRows
+              pricing={pricing}
+              gpValue={quoteForm.gp_pct}
+              rebateValue={quoteForm.rebate_pct}
+              onGpChange={(v) => setQuoteForm({ ...quoteForm, gp_pct: v })}
+              onRebateChange={(v) => setQuoteForm({ ...quoteForm, rebate_pct: v })}
+            />
           </div>
         </div>
       )}
 
       <div className="total-bar">
         <div>
-          <div className="total-bar-label">Grand total</div>
-          <div className="total-bar-amount">{`£${grandTotal.toFixed(2)}`}</div>
+          <div className="total-bar-label">Total quote</div>
+          <div className="total-bar-amount">{`£${pricing.totalQuote.toFixed(2)}`}</div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 2 }}>Factory cost £{factoryCost.toFixed(2)}</div>
           {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
         </div>
         <div className="total-bar-actions">
@@ -1034,7 +1091,7 @@ export default function QuoteBuilder({
             <div className="modal-handle" />
             <h2 style={{ marginBottom: 4 }}>{editingQuote ? 'Update quote' : 'Save quote'}</h2>
             <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 ? 10 : 20 }}>
-              {activeCount} item{activeCount !== 1 ? 's' : ''} · £{grandTotal.toFixed(2)} total
+              {activeCount} item{activeCount !== 1 ? 's' : ''} · factory cost £{factoryCost.toFixed(2)} · total quote £{pricing.totalQuote.toFixed(2)}
             </p>
             {missingVariants.length > 0 && (
               <div style={{ padding: '8px 12px', background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--warning)', marginBottom: 16 }}>

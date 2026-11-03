@@ -6,6 +6,7 @@ import type {
   Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild,
 } from './types'
 import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
+import { quotePricing } from './utils/pricing'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -35,7 +36,7 @@ function PricesReviewed({ date }: { date: string }) {
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
-  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '',
+  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '', gp_pct: '', rebate_pct: '',
 }
 
 // The saved quote currently loaded into the builder for editing
@@ -345,7 +346,8 @@ export default function App() {
     const labourTotal = labourMinutes * labourRate
     const carriage = Math.max(0, parseFloat(formData.carriage) || 0)
     // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
-    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+    const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
+    const pricing = quotePricing(factoryCost, formData.gp_pct, formData.rebate_pct)
     const build: QuoteBuild = {
       base_quantities: quantities,
       variant_selections: variantSelections,
@@ -362,7 +364,11 @@ export default function App() {
       customer_name: formData.customer_name.trim() || null,
       mo_number: formData.mo_number.trim() || null,
       notes: formData.notes.trim() || null,
-      grand_total: grandTotal,
+      grand_total: factoryCost,   // "Factory cost" in the app
+      gross_profit_pct: pricing.gpPct,
+      quote_price: pricing.quotePrice,
+      rebate_pct: pricing.rebatePct,
+      total_quote: pricing.totalQuote,
       materials_subtotal: materialsSubtotal,
       hardware_uplift_pct: upliftPct,
       hardware_uplift_amount: hardwareUpliftAmount,
@@ -472,6 +478,8 @@ export default function App() {
       labour_minutes: build ? build.labour_minutes : (Number(quote.labour_minutes) ? String(quote.labour_minutes) : ''),
       uplift_pct: Number(quote.hardware_uplift_pct) === settings.hardware_uplift_pct ? '' : String(quote.hardware_uplift_pct),
       carriage: Number(quote.carriage) ? String(quote.carriage) : '',
+      gp_pct: Number(quote.gross_profit_pct) ? String(quote.gross_profit_pct) : '',
+      rebate_pct: Number(quote.rebate_pct) ? String(quote.rebate_pct) : '',
     })
     setEditingQuote({ id: quote.id, project_name: quote.project_name })
     setView('builder')
