@@ -54,7 +54,7 @@ type SteelKey = 'material' | 'internals' | 'gasket' | 'label' | 'root' | 'other'
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
   { key: 'steelwork', label: 'Steelwork', hint: 'The cabinet, step by step.' },
   { key: 'incomer', label: 'Incomer', hint: 'Incoming supply, surge protection, PEN fault protection and metering.' },
-  { key: 'distribution', label: 'Distribution', hint: 'Copper bars, and the supports and shrouds for them.' },
+  { key: 'distribution', label: 'Distribution', hint: 'Copper bars and busbar assemblies, then the insulators for them.' },
   { key: 'outgoing', label: 'Outgoing', hint: 'MCBs and RCDs for the outgoing circuits.' },
   { key: 'accessories', label: 'Accessories', hint: 'Everything else.' },
   { key: 'review', label: 'Review & save', hint: 'Check the quote details, labour and totals, then save.' },
@@ -80,10 +80,10 @@ const STEEL_RULES: [SteelKey, RegExp][] = [
   ['material', /cabinet|enclosure|pillar|\bsize ?\d|housing|body|zintec|stainless|mild steel|door|kiosk/i],
 ]
 
+// Copper bars first: busbar assemblies, and copper/busbar parts that aren't
+// supports or shrouds. Everything else goes under "Other insulators".
 const DISTRIBUTION_GROUPS: [string, RegExp][] = [
-  ['Shrouds', /shroud|cover|guard|barrier/i],
-  ['Supports', /support|insulator|stand ?-?off|bracket/i],
-  ['Copper bars', /copper|bus ?bar|\bbar\b|link/i],
+  ['Copper bars', /assembl|^(?!.*(support|insulator|shroud|stand ?-?off|cover|guard|barrier)).*(copper|bus ?bar|\bbar\b|link)/i],
 ]
 
 const OUTGOING_GROUPS: [string, RegExp][] = [
@@ -577,7 +577,7 @@ export default function StepBuilder({
       {section === 'steelwork' && renderExtras(`steelwork.${currentSteel.key}`)}
 
       {section === 'incomer' && renderParts(bySection.incomer, 'No incomer parts in the catalogue yet.')}
-      {section === 'distribution' && renderGroups(groupBy(bySection.distribution, DISTRIBUTION_GROUPS, 'Other distribution'), 'No distribution parts in the catalogue yet.')}
+      {section === 'distribution' && renderGroups(groupBy(bySection.distribution, DISTRIBUTION_GROUPS, 'Other insulators'), 'No distribution parts in the catalogue yet.')}
       {section === 'outgoing' && renderGroups(groupBy(bySection.outgoing, OUTGOING_GROUPS, 'Other outgoing'), 'No outgoing parts in the catalogue yet.')}
       {section === 'accessories' && renderGroups(groupBy(bySection.accessories, [], 'Accessories'), 'No accessories in the catalogue yet.')}
       {section !== 'steelwork' && section !== 'review' && renderExtras(section)}
