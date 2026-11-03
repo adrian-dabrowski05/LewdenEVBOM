@@ -8,7 +8,7 @@ import { EXTRAS_CATEGORY } from '../types'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult } from '../utils/extras'
 import type { EditingQuote } from '../App'
-import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt } from './QuoteBuilder'
+import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner } from './QuoteBuilder'
 
 // Step-by-step quote builder. Uses the same BOM, extras and quote details as the
 // full Quote builder, so a rep can switch between the two at any time.
@@ -40,6 +40,10 @@ interface Props {
   setBuildContext: (ctx: BuildContext) => void
   editingQuote: EditingQuote | null
   onCancelEdit: () => void
+  isAdmin: boolean
+  onMoveProduct: (productId: string, groupIds: string[], dir: -1 | 1) => void
+  onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
+  reordering: boolean
 }
 
 // ── Where every part and extra goes ────────────────────────────
@@ -154,8 +158,11 @@ export default function StepBuilder({
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
+  isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
   const [sectionIdx, setSectionIdx] = useState(0)
+  const [reorderToggle, setReorderToggle] = useState(false)
+  const reorderMode = isAdmin && reorderToggle
   const [steelKey, setSteelKey] = useState<SteelKey>('material')
   const [saving, setSaving] = useState(false)
 
@@ -309,7 +316,7 @@ export default function StepBuilder({
   }
 
   // ── Pieces ──
-  const renderPart = (p: Product) => {
+  const renderPart = (p: Product, idx: number, group: Product[]) => {
     const qty = quantities[p.id] ?? 0
     const onQuote = finalQty[p.id] ?? 0
     const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
@@ -321,7 +328,11 @@ export default function StepBuilder({
     const diff = extrasResult.delta[p.id]
     return (
       <div key={p.id} style={{ padding: '10px 12px', border: `1.5px solid ${qty > 0 ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: qty > 0 ? 'var(--brand-light)' : 'var(--surface)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {reorderMode && (
+          <MoveButtons index={idx} count={group.length} disabled={reordering} onMove={(dir) => onMoveProduct(p.id, group.map((g) => g.id), dir)} />
+        )}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 220px', minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: qty > 0 ? 600 : 500 }}>{p.description}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
@@ -353,6 +364,7 @@ export default function StepBuilder({
             </div>
           </div>
         </div>
+        </div>
         {pvs.length > 0 && qty > 0 && (
           <div style={{ marginTop: 8 }}>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: selectedId ? 'var(--brand)' : 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
@@ -371,7 +383,7 @@ export default function StepBuilder({
   const renderParts = (items: Product[], emptyText: string) => (
     items.length === 0
       ? <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-3)' }}>{emptyText}</div>
-      : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map(renderPart)}</div>
+      : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map((p, idx) => renderPart(p, idx, items))}</div>
   )
 
   const renderGroups = (groups: { label: string; items: Product[] }[], emptyText: string) => (
@@ -392,8 +404,9 @@ export default function StepBuilder({
       <div className="card" style={{ padding: '14px 16px', marginTop: 16 }}>
         <div style={sectionTitleStyle}>Extras</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {list.map((extra) => (
-            <ExtraRow key={extra.id} extra={extra} ctx={buildContext} isTicked={selectedExtras.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggleExtra} onSetCount={onSetExtraCount} productsById={productsById} />
+          {list.map((extra, idx) => (
+            <ExtraRow key={extra.id} extra={extra} ctx={buildContext} isTicked={selectedExtras.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggleExtra} onSetCount={onSetExtraCount} productsById={productsById}
+              move={reorderMode ? { index: idx, count: list.length, disabled: reordering, onMove: (dir) => onMoveExtra(extra.id, list.map((e) => e.id), dir) } : undefined} />
           ))}
         </div>
       </div>
@@ -538,10 +551,15 @@ export default function StepBuilder({
         </div>
       )}
 
-      <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 19 }}>{heading}</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 3 }}>{hint}</p>
+      <div style={{ marginBottom: 14, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ fontSize: 19 }}>{heading}</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 3 }}>{hint}</p>
+        </div>
+        {isAdmin && section !== 'review' && <ReorderToggle on={reorderToggle} onChange={setReorderToggle} />}
       </div>
+
+      {reorderMode && section !== 'review' && <ReorderBanner />}
 
       {section === 'steelwork' && currentSteel.key === 'material' && (
         <>

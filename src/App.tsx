@@ -6,6 +6,10 @@ import type {
   Extra, BuildContext, QuoteExtra, ExtraCountMap, QuoteBuild,
 } from './types'
 import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
+
+// Extras show in the admin's chosen order; extras never reordered sit by their number
+const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
+const sortExtras = (list: Extra[]) => [...list].sort((a, b) => extraOrder(a) - extraOrder(b) || a.number - b.number)
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
@@ -70,7 +74,7 @@ export default function App() {
   useEffect(() => { loadProducts() }, [])
   const loadProducts = async () => {
     setProductsLoading(true)
-    const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('sort_order')
+    const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('sort_order').order('created_at').order('id')
     if (error) showToast('Failed to load products', 'error')
     else setProducts(data || [])
     setProductsLoading(false)
@@ -100,8 +104,73 @@ export default function App() {
   useEffect(() => { loadExtras() }, [])
   const loadExtras = async () => {
     const { data, error } = await supabase.from('extras').select('*, extra_items(*)').order('number')
-    if (!error) setExtras(data || [])
+    if (!error) setExtras(sortExtras(data || []))
   }
+
+  // ── Admin: reorder parts and extras (saved for everyone) ───
+  // groupIds is the list as the admin sees it (a category, a step or a group).
+  // The part swaps places with its neighbour in that list.
+  const [reordering, setReordering] = useState(false)
+
+  const moveProduct = useCallback(async (productId: string, groupIds: string[], dir: -1 | 1) => {
+    const i = groupIds.indexOf(productId)
+    const j = i + dir
+    if (reordering || i < 0 || j < 0 || j >= groupIds.length) return
+    const order = products.map((p) => p.id)
+    const a = order.indexOf(productId)
+    const b = order.indexOf(groupIds[j])
+    if (a < 0 || b < 0) return
+    ;[order[a], order[b]] = [order[b], order[a]]
+
+    // If every part already has its own number, swapping the two numbers is enough.
+    // Otherwise (e.g. all 0 to begin with) number the whole list 10, 20, 30…
+    const strictlyIncreasing = products.every((p, k) => k === 0 || p.sort_order > products[k - 1].sort_order)
+    const newOrder: Record<string, number> = {}
+    if (strictlyIncreasing) {
+      products.forEach((p) => { newOrder[p.id] = p.sort_order })
+      newOrder[order[a]] = products[a].sort_order
+      newOrder[order[b]] = products[b].sort_order
+    } else {
+      order.forEach((id, k) => { newOrder[id] = (k + 1) * 10 })
+    }
+
+    const byId = Object.fromEntries(products.map((p) => [p.id, p]))
+    const changed = products.filter((p) => p.sort_order !== newOrder[p.id])
+    setProducts(order.map((id) => ({ ...byId[id], sort_order: newOrder[id] })))
+
+    setReordering(true)
+    const results = await Promise.all(changed.map((p) => supabase.from('products').update({ sort_order: newOrder[p.id] }).eq('id', p.id)))
+    setReordering(false)
+    const failed = results.find((r) => r.error)
+    if (failed) { showToast(`Could not save the new order: ${failed.error?.message}`, 'error'); loadProducts() }
+  }, [products, reordering, showToast])
+
+  const moveExtra = useCallback(async (extraId: string, groupIds: string[], dir: -1 | 1) => {
+    const i = groupIds.indexOf(extraId)
+    const j = i + dir
+    if (reordering || i < 0 || j < 0 || j >= groupIds.length) return
+    const order = extras.map((e) => e.id)
+    const a = order.indexOf(extraId)
+    const b = order.indexOf(groupIds[j])
+    if (a < 0 || b < 0) return
+    ;[order[a], order[b]] = [order[b], order[a]]
+    // Extras are few, so just number them all 10, 20, 30…
+    const newOrder: Record<string, number> = {}
+    order.forEach((id, k) => { newOrder[id] = (k + 1) * 10 })
+    const byId = Object.fromEntries(extras.map((e) => [e.id, e]))
+    const changed = extras.filter((e) => e.sort_order !== newOrder[e.id])
+    setExtras(order.map((id) => ({ ...byId[id], sort_order: newOrder[id] })))
+
+    setReordering(true)
+    const results = await Promise.all(changed.map((e) => supabase.from('extras').update({ sort_order: newOrder[e.id] }).eq('id', e.id)))
+    setReordering(false)
+    const failed = results.find((r) => r.error)
+    if (failed) {
+      const msg = failed.error?.message ?? ''
+      showToast(/sort_order/.test(msg) ? 'Run supabase/extras-sort-order.sql in Supabase first' : `Could not save the new order: ${msg}`, 'error')
+      loadExtras()
+    }
+  }, [extras, reordering, showToast])
 
   const toggleExtra = useCallback((extraId: string) => {
     setSelectedExtras((prev) => { const next = new Set(prev); next.has(extraId) ? next.delete(extraId) : next.add(extraId); return next })
@@ -447,6 +516,10 @@ export default function App() {
             setBuildContext,
             editingQuote,
             onCancelEdit: cancelEdit,
+            isAdmin,
+            onMoveProduct: moveProduct,
+            onMoveExtra: moveExtra,
+            reordering,
           }
           return stepMode ? <StepBuilder {...builderProps} /> : <QuoteBuilder {...builderProps} />
         })()}

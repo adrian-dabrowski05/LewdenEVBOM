@@ -185,6 +185,7 @@ export interface Extra {
   allowed_ratings: number[] | null
   allowed_materials: CabinetMaterial[] | null
   scales_with_bom: boolean   // rep picks how many times it applies, e.g. how many RCDs to swap
+  sort_order?: number | null // order in the builders, set by the admin (falls back to number)
   created_at: string
   updated_at: string
   extra_items?: ExtraItem[]

@@ -38,6 +38,10 @@ interface Props {
   setBuildContext: (ctx: BuildContext) => void
   editingQuote: EditingQuote | null
   onCancelEdit: () => void
+  isAdmin: boolean
+  onMoveProduct: (productId: string, groupIds: string[], dir: -1 | 1) => void
+  onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
+  reordering: boolean
 }
 
 export const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
@@ -56,6 +60,40 @@ export function Stepper({ value, onChange }: { value: number; onChange: (n: numb
       <button className="stepper-btn" onPointerDown={(e) => { e.preventDefault(); onChange(Math.max(0, value - 1)) }} aria-label="Decrease">−</button>
       <input className="stepper-input" type="number" min="0" max="999" value={value || ''} placeholder="0" onChange={(e) => onChange(Math.max(0, parseInt(e.target.value) || 0))} />
       <button className="stepper-btn" onPointerDown={(e) => { e.preventDefault(); onChange(value + 1) }} aria-label="Increase">+</button>
+    </div>
+  )
+}
+
+// ── Admin reorder: up / down arrows, and the switch that shows them ──
+export function MoveButtons({ index, count, disabled, onMove }: {
+  index: number
+  count: number
+  disabled?: boolean
+  onMove: (dir: -1 | 1) => void
+}) {
+  const btn = (enabled: boolean) => ({ width: 26, height: 22, padding: 0, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border-strong)', background: 'var(--surface)', color: 'var(--text-2)', fontSize: 11, lineHeight: 1, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.3 })
+  const canUp = !disabled && index > 0
+  const canDown = !disabled && index < count - 1
+  return (
+    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+      <button type="button" style={btn(canUp)} disabled={!canUp} onClick={(e) => { e.stopPropagation(); onMove(-1) }} aria-label="Move up" title="Move up">▲</button>
+      <button type="button" style={btn(canDown)} disabled={!canDown} onClick={(e) => { e.stopPropagation(); onMove(1) }} aria-label="Move down" title="Move down">▼</button>
+    </div>
+  )
+}
+
+export function ReorderToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button type="button" className="btn btn-sm" onClick={() => onChange(!on)} style={on ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff' } : {}} title="Admin only: change the order parts and extras are listed in, for everyone">
+      {on ? 'Done reordering' : 'Reorder'}
+    </button>
+  )
+}
+
+export function ReorderBanner() {
+  return (
+    <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--brand-light)', border: '1px solid var(--brand)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--brand)' }}>
+      Reorder mode: use ▲ ▼ to move parts and extras. The new order is saved straight away and everyone sees it.
     </div>
   )
 }
@@ -338,7 +376,7 @@ export function PresetsBar({ presets, products, onApply }: {
 }
 
 // ── One extra as a tick box (used by the Extras panel and the step-by-step builder) ──
-export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, productsById }: {
+export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, productsById, move }: {
   extra: Extra
   ctx: BuildContext
   isTicked: boolean
@@ -346,13 +384,16 @@ export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, 
   onToggle: (extraId: string) => void
   onSetCount: (extraId: string, count: number) => void
   productsById: Record<string, Product>
+  move?: { index: number; count: number; disabled?: boolean; onMove: (dir: -1 | 1) => void }
 }) {
   const reason = extraUnavailableReason(extra, ctx)
   const disabled = reason != null && !isTicked
   const lines = (applied?.lines ?? []).filter((l) => l.requested > 0)
   return (
     <div style={{ padding: '8px 10px', border: `1.5px solid ${applied ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: applied ? 'var(--brand-light)' : 'transparent', opacity: disabled ? 0.5 : 1 }}>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      {move && <MoveButtons {...move} />}
+      <label style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer' }}>
         <input type="checkbox" checked={isTicked} disabled={disabled} onChange={() => onToggle(extra.id)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 500 }}>
@@ -363,6 +404,7 @@ export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, 
           {reason && <div style={{ fontSize: 12, color: isTicked ? 'var(--danger)' : 'var(--text-3)', marginTop: 2 }}>{isTicked ? `Not applied: ${reason}` : reason}</div>}
         </div>
       </label>
+      </div>
       {applied && extra.scales_with_bom && (() => {
         const max = applied.maxCount
         const btn = (enabled: boolean) => ({ width: 28, height: 28, borderRadius: 'var(--radius-sm)', border: '1.5px solid var(--border-strong)', background: 'var(--surface)', fontSize: 16, lineHeight: 1, cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.35 })
@@ -429,7 +471,7 @@ export function BuildContextFields({ ctx, setCtx }: { ctx: BuildContext; setCtx:
 }
 
 // ── Extras panel ───────────────────────────────────────────────
-function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setCtx, productsById }: {
+function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setCtx, productsById, reorderMode, reordering, onMoveExtra }: {
   extras: Extra[]
   selected: Set<string>
   onToggle: (extraId: string) => void
@@ -438,8 +480,12 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setC
   ctx: BuildContext
   setCtx: (ctx: BuildContext) => void
   productsById: Record<string, Product>
+  reorderMode: boolean
+  reordering: boolean
+  onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
 }) {
   if (extras.length === 0) return null
+  const ids = extras.map((e) => e.id)
   const appliedById = Object.fromEntries(result.applied.map((a) => [a.extra.id, a]))
   return (
     <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
@@ -451,8 +497,9 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setC
       <div style={{ marginBottom: 12 }}><BuildContextFields ctx={ctx} setCtx={setCtx} /></div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {extras.map((extra) => {
-          return <ExtraRow key={extra.id} extra={extra} ctx={ctx} isTicked={selected.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggle} onSetCount={onSetCount} productsById={productsById} />
+        {extras.map((extra, i) => {
+          const move = reorderMode ? { index: i, count: extras.length, disabled: reordering, onMove: (dir: -1 | 1) => onMoveExtra(extra.id, ids, dir) } : undefined
+          return <ExtraRow key={extra.id} extra={extra} ctx={ctx} isTicked={selected.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggle} onSetCount={onSetCount} productsById={productsById} move={move} />
         })}
       </div>
     </div>
@@ -466,8 +513,11 @@ export default function QuoteBuilder({
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
+  isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
   const [search, setSearch] = useState('')
+  const [reorderToggle, setReorderToggle] = useState(false)
+  const reorderMode = isAdmin && reorderToggle
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
@@ -763,11 +813,18 @@ export default function QuoteBuilder({
         </div>
       </div>
 
-      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} />
+      {reorderMode && <ReorderBanner />}
 
-      <div className="toolbar">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" />
+      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} reorderMode={reorderMode} reordering={reordering} onMoveExtra={onMoveExtra} />
+
+      <div className="toolbar" style={isAdmin ? { display: 'flex', gap: 8, alignItems: 'center' } : undefined}>
+        <div style={{ flex: 1, minWidth: 0 }}><SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" /></div>
+        {isAdmin && <ReorderToggle on={reorderToggle} onChange={setReorderToggle} />}
       </div>
+
+      {reorderMode && searchActive && (
+        <div style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 12 }}>Clear the search to move parts.</div>
+      )}
 
       {missingVariants.length > 0 && (
         <div style={{ padding: '10px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 13, color: 'var(--danger)', fontWeight: 500 }}>
@@ -784,6 +841,9 @@ export default function QuoteBuilder({
         if (items.length === 0) return null
         const isOpen = searchActive || !collapsed.has(cat)
         const catQty = items.reduce((s, p) => s + (quantities[p.id] ?? 0), 0)
+        const itemIds = items.map((p) => p.id)
+        const canMove = reorderMode && !searchActive
+        const moveProps = (idx: number) => ({ index: idx, count: items.length, disabled: reordering, onMove: (dir: -1 | 1) => onMoveProduct(items[idx].id, itemIds, dir) })
 
         return (
           <div className="category-section" key={cat}>
@@ -802,6 +862,7 @@ export default function QuoteBuilder({
                   <table className="product-table">
                     <thead>
                       <tr>
+                        {canMove && <th style={{ width: 40 }}></th>}
                         <th>Description</th>
                         <th style={{ width: 130 }}>Part no.</th>
                         <th className="right" style={{ width: 90 }}>Unit cost</th>
@@ -810,7 +871,7 @@ export default function QuoteBuilder({
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((p) => {
+                      {items.map((p, idx) => {
                         const qty = quantities[p.id] ?? 0
                         const onQuote = finalQty[p.id] ?? 0
                         const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
@@ -820,6 +881,7 @@ export default function QuoteBuilder({
                         const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
                         return (
                           <tr key={p.id} style={isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
+                            {canMove && <td style={{ verticalAlign: 'middle' }}><MoveButtons {...moveProps(idx)} /></td>}
                             <td>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
@@ -844,7 +906,7 @@ export default function QuoteBuilder({
                 </div>
 
                 <div className="product-cards">
-                  {items.map((p) => {
+                  {items.map((p, idx) => {
                     const qty = quantities[p.id] ?? 0
                     const onQuote = finalQty[p.id] ?? 0
                     const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
@@ -854,6 +916,12 @@ export default function QuoteBuilder({
                     const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
                     return (
                       <div key={p.id} className="product-card" style={qty > 0 ? { borderColor: isAutoAdded ? 'var(--success)' : 'var(--brand)', borderWidth: '1.5px' } : {}}>
+                        {canMove && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Position {idx + 1} of {items.length}</span>
+                            <MoveButtons {...moveProps(idx)} />
+                          </div>
+                        )}
                         <div className="product-card-header">
                           <div>
                             <div className="product-card-desc">{p.description}</div>
