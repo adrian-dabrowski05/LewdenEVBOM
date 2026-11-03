@@ -193,6 +193,7 @@ export interface Extra {
   allowed_materials: CabinetMaterial[] | null
   scales_with_bom: boolean   // rep picks how many times it applies, e.g. how many RCDs to swap
   rep_priced?: boolean       // rep types in a cost (e.g. non-standard colour), added at face value
+  rep_cost_uplift?: boolean  // that cost counts as hardware: it goes in materials and gets the hardware uplift
   sort_order?: number | null // order in the builders, set by the admin (falls back to number)
   created_at: string
   updated_at: string
@@ -205,6 +206,7 @@ export interface QuoteExtra {
   labour_minutes: number
   count?: number
   cost?: number   // rep-entered cost (rep-priced extras only), at face value
+  cost_in_materials?: boolean   // that cost is in the materials subtotal (got the uplift), so not listed again
 }
 
 // How many times the rep wants each "scales with BOM" extra applied (missing = as many as possible)

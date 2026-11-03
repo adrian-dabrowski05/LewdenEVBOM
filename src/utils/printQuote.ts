@@ -63,7 +63,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   ` : ''
 
   // Rep-entered extra costs (e.g. non-standard colour), at face value
-  const extraCostRows = extras.filter((e) => Number(e.cost) > 0).map((e) => `
+  const extraCostRows = extras.filter((e) => Number(e.cost) > 0 && !e.cost_in_materials).map((e) => `
     <tr class="summary-row">
       <td colspan="4" class="right label">${e.name}</td>
       <td class="right">£${Number(e.cost).toFixed(2)}</td>

@@ -283,7 +283,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                           <span style={{ color: 'var(--brand)' }}>{fmt(q.labour_total)}</span>
                         </div>
                       )}
-                      {(q.extras ?? []).filter((e) => Number(e.cost) > 0).map((e) => (
+                      {(q.extras ?? []).filter((e) => Number(e.cost) > 0 && !e.cost_in_materials).map((e) => (
                         <div key={e.number} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                           <span style={{ color: 'var(--text-2)' }}>{e.name}</span>
                           <span>{fmt(Number(e.cost))}</span>
