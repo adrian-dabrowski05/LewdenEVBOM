@@ -60,6 +60,14 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     </tr>
   ` : ''
 
+  // Rep-entered extra costs (e.g. non-standard colour), at face value
+  const extraCostRows = extras.filter((e) => Number(e.cost) > 0).map((e) => `
+    <tr class="summary-row">
+      <td colspan="4" class="right label">${e.name}</td>
+      <td class="right">£${Number(e.cost).toFixed(2)}</td>
+    </tr>
+  `).join('')
+
   const carriage = Number(opts.carriage) || 0
   const carriageRow = carriage > 0 ? `
     <tr class="summary-row">
@@ -190,6 +198,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
       </tr>
       ${upliftRow}
       ${labourRow}
+      ${extraCostRows}
       ${carriageRow}
       <tr class="total-row">
         <td colspan="4" class="right">Grand total</td>

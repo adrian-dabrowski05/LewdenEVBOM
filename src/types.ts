@@ -185,6 +185,7 @@ export interface Extra {
   allowed_ratings: number[] | null
   allowed_materials: CabinetMaterial[] | null
   scales_with_bom: boolean   // rep picks how many times it applies, e.g. how many RCDs to swap
+  rep_priced?: boolean       // rep types in a cost (e.g. non-standard colour), added at face value
   sort_order?: number | null // order in the builders, set by the admin (falls back to number)
   created_at: string
   updated_at: string
@@ -196,11 +197,17 @@ export interface QuoteExtra {
   name: string
   labour_minutes: number
   count?: number
+  cost?: number   // rep-entered cost (rep-priced extras only), at face value
 }
 
 // How many times the rep wants each "scales with BOM" extra applied (missing = as many as possible)
 export interface ExtraCountMap {
   [extraId: string]: number
+}
+
+// Cost the rep typed in for each rep-priced extra, in £ (kept as typed, blank = none)
+export interface ExtraCostMap {
+  [extraId: string]: string
 }
 
 // What the pillar is, used to decide which extras (and which extra lines) apply
@@ -219,6 +226,7 @@ export interface QuoteBuild {
   auto_added: AutoAddedMap
   selected_extras: string[]   // extra ids
   extra_counts: ExtraCountMap
+  extra_costs?: ExtraCostMap  // rep-entered costs of rep-priced extras
   build_context: BuildContext
   labour_minutes: string      // rep's minutes, before extras labour
 }

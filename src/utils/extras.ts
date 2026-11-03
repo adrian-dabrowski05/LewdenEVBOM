@@ -1,4 +1,4 @@
-import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, ExtraCountMap } from '../types'
+import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, ExtraCountMap, ExtraCostMap, QuoteExtra } from '../types'
 
 export const MATERIAL_LABELS: Record<CabinetMaterial, string> = {
   mild_steel: 'Mild steel (Zintec)',
@@ -68,6 +68,7 @@ export interface AppliedExtra {
   lines: ExtraLine[]
   count: number             // times applied (always 1 unless the extra scales with the BOM)
   maxCount: number | null   // most it could be applied, null = no limit
+  cost: number              // rep-entered cost (rep-priced extras), 0 otherwise
 }
 
 export interface ExtrasResult {
@@ -75,6 +76,24 @@ export interface ExtrasResult {
   effectiveQty: QuantityMap   // final BOM quantities after extras
   delta: QuantityMap          // change made by extras per product (+/-)
   labourMinutes: number
+  repCost: number             // total of rep-entered extra costs, added at face value (no uplift, no labour)
+}
+
+// Turn a typed £ amount into a number (blank, bad or negative = 0)
+export function parseCost(value: string | undefined): number {
+  const n = parseFloat(value ?? '')
+  return isNaN(n) ? 0 : Math.max(0, n)
+}
+
+// What is saved on the quote (and printed) for each applied extra
+export function toQuoteExtras(applied: AppliedExtra[]): QuoteExtra[] {
+  return applied.map(({ extra, count, cost }) => ({
+    number: extra.number,
+    name: extra.name,
+    labour_minutes: Number(extra.labour_minutes) || 0,
+    ...(extra.scales_with_bom ? { count } : {}),
+    ...(extra.rep_priced ? { cost } : {}),
+  }))
 }
 
 // Apply the ticked extras, in number order, on top of the rep's BOM.
@@ -84,10 +103,13 @@ export interface ExtrasResult {
 // An extra that scales with the BOM applies its lines `count` times. By default
 // that is as many times as its Remove lines can be met (e.g. every Type A RCD
 // in the BOM); the rep can lower it with the stepper in the Extras panel.
-export function computeExtras(extras: Extra[], selected: Set<string>, ctx: BuildContext, baseQty: QuantityMap, counts: ExtraCountMap = {}): ExtrasResult {
+// A rep-priced extra (e.g. non-standard colour) carries the cost the rep typed in;
+// that cost is added to the quote at face value, with no uplift and no labour.
+export function computeExtras(extras: Extra[], selected: Set<string>, ctx: BuildContext, baseQty: QuantityMap, counts: ExtraCountMap = {}, costs: ExtraCostMap = {}): ExtrasResult {
   const qty: QuantityMap = { ...baseQty }
   const applied: AppliedExtra[] = []
   let labourMinutes = 0
+  let repCost = 0
 
   const ticked = extras
     .filter((e) => selected.has(e.id) && extraUnavailableReason(e, ctx) == null)
@@ -123,7 +145,9 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     })
 
     labourMinutes += Number(extra.labour_minutes) || 0
-    applied.push({ extra, lines, count, maxCount })
+    const cost = extra.rep_priced ? parseCost(costs[extra.id]) : 0
+    repCost += cost
+    applied.push({ extra, lines, count, maxCount, cost })
   })
 
   const delta: QuantityMap = {}
@@ -135,5 +159,5 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     if (finalQty > 0) effectiveQty[id] = finalQty
   })
 
-  return { applied, effectiveQty, delta, labourMinutes }
+  return { applied, effectiveQty, delta, labourMinutes, repCost }
 }
