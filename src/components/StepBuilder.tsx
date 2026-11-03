@@ -72,7 +72,7 @@ const STEEL_RULES: [SteelKey, RegExp][] = [
   ['label', /label|danger|warning|sticker|sign\b/i],
   ['root', /\broots?\b|plinth|ground|buried|base frame/i],
   ['internals', /internal|gear ?tray|mounting plate|back ?plate|chassis|din ?rail|bracket|gland/i],
-  ['material', /cabinet|enclosure|pillar|housing|body|zintec|stainless|mild steel|door|kiosk/i],
+  ['material', /cabinet|enclosure|pillar|\bsize ?\d|housing|body|zintec|stainless|mild steel|door|kiosk/i],
 ]
 
 const DISTRIBUTION_GROUPS: [string, RegExp][] = [
@@ -111,7 +111,18 @@ const SECTION_CATEGORIES: Partial<Record<SectionKey, string[]>> = {
   outgoing: ['Outgoing'],
 }
 
-const textOf = (p: Product) => `${p.description} ${p.part_number ?? ''} ${p.notes ?? ''}`
+// Sorting looks at the part's name (description + part number) first. Notes are only
+// used when the name matches nothing, so a note like "includes internals" on a
+// pillar doesn't pull the pillar into the Internals step.
+const nameOf = (p: Product) => `${p.description} ${p.part_number ?? ''}`
+
+function firstMatch<K>(p: Product, rules: [K, RegExp][]): K | null {
+  for (const text of [nameOf(p), p.notes ?? '']) {
+    if (!text.trim()) continue
+    for (const [key, re] of rules) if (re.test(text)) return key
+  }
+  return null
+}
 
 function sectionOf(p: Product): SectionKey {
   for (const [key, cats] of Object.entries(SECTION_CATEGORIES)) {
@@ -121,15 +132,14 @@ function sectionOf(p: Product): SectionKey {
 }
 
 function steelStepOf(p: Product): SteelKey {
-  const text = textOf(p)
-  for (const [key, re] of STEEL_RULES) if (re.test(text)) return key
-  return 'other'
+  return firstMatch(p, STEEL_RULES) ?? 'other'
 }
 
 function groupBy(items: Product[], rules: [string, RegExp][], otherLabel: string) {
   const groups: { label: string; items: Product[] }[] = [...rules.map(([label]) => ({ label, items: [] as Product[] })), { label: otherLabel, items: [] }]
   items.forEach((p) => {
-    const i = rules.findIndex(([, re]) => re.test(textOf(p)))
+    const label = firstMatch(p, rules)
+    const i = label == null ? -1 : rules.findIndex(([l]) => l === label)
     groups[i === -1 ? groups.length - 1 : i].items.push(p)
   })
   return groups.filter((g) => g.items.length > 0)
