@@ -19,7 +19,7 @@ import PartRequests from './components/PartRequests'
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
-  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '',
+  project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '',
 }
 
 // The saved quote currently loaded into the builder for editing
@@ -239,7 +239,9 @@ export default function App() {
     const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) }))
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
-    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
+    const carriage = Math.max(0, parseFloat(formData.carriage) || 0)
+    // Carriage goes on at face value, after uplift and labour
+    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + carriage
     const build: QuoteBuild = {
       base_quantities: quantities,
       variant_selections: variantSelections,
@@ -262,6 +264,7 @@ export default function App() {
       labour_minutes: labourMinutes,
       labour_rate_per_min: labourRate,
       labour_total: labourTotal,
+      carriage,
       extras: quoteExtras,
       build,
     }
@@ -362,6 +365,7 @@ export default function App() {
       notes: quote.notes ?? '',
       labour_minutes: build ? build.labour_minutes : (Number(quote.labour_minutes) ? String(quote.labour_minutes) : ''),
       uplift_pct: Number(quote.hardware_uplift_pct) === settings.hardware_uplift_pct ? '' : String(quote.hardware_uplift_pct),
+      carriage: Number(quote.carriage) ? String(quote.carriage) : '',
     })
     setEditingQuote({ id: quote.id, project_name: quote.project_name })
     setView('builder')
