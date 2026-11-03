@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { Quote, QuoteStatus } from '../types'
 import SearchBar from './SearchBar'
-import { printSavedQuote, printBOM } from '../utils/printQuote'
+import { printSavedQuote, printBOM, hardwareExtraItems } from '../utils/printQuote'
 import { savedQuotePricing } from '../utils/pricing'
 
 interface Props {
@@ -252,6 +252,16 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                             <td className="right">{item.factory_cost != null ? fmt(item.factory_cost) : <span className="cost-tbc">TBC</span>}</td>
                             <td className="right">{item.quantity}</td>
                             <td className="right" style={{ fontWeight: 600 }}>{item.line_total != null ? fmt(item.line_total) : <span className="cost-tbc">TBC</span>}</td>
+                          </tr>
+                        ))}
+                        {hardwareExtraItems(q.extras).map((e, i) => (
+                          <tr key={`extra-${i}`}>
+                            <td>{e.description}</td>
+                            <td><span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span></td>
+                            <td><span style={{ color: 'var(--text-3)', fontSize: 12 }}>Extra</span></td>
+                            <td className="right">{fmt(e.factory_cost)}</td>
+                            <td className="right">1</td>
+                            <td className="right" style={{ fontWeight: 600 }}>{fmt(e.line_total)}</td>
                           </tr>
                         ))}
                       </tbody>

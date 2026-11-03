@@ -490,11 +490,19 @@ export default function StepBuilder({
         })}
         {(() => {
           const items = activeItems.filter((p) => p.category === EXTRAS_CATEGORY)
-          if (items.length === 0) return null
+          // Rep-priced extras that count as hardware (e.g. earth bar): their cost is in materials
+          const costed = extrasResult.applied.filter((a) => a.extra.rep_cost_uplift && a.cost > 0)
+          if (items.length === 0 && costed.length === 0) return null
           return (
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Parts added by extras</div>
               {items.map((p) => <BomLine key={p.id} p={p} qty={finalQty[p.id]} variant={null} />)}
+              {costed.map(({ extra, cost }) => (
+                <div key={extra.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '3px 0' }}>
+                  <span><span style={{ fontFamily: 'var(--mono)', fontWeight: 600, marginRight: 6 }}>1×</span>{extra.name}</span>
+                  <span style={{ flexShrink: 0, fontWeight: 500 }}>{fmt(cost)}</span>
+                </div>
+              ))}
             </div>
           )
         })()}

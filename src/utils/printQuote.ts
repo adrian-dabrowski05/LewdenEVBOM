@@ -29,6 +29,19 @@ interface PrintQuoteOptions {
   extras?: QuoteExtra[]
 }
 
+// Rep-priced extras that count as hardware (e.g. earth bar) have no part line of their
+// own, but their cost is in materials, so they are listed on the BOM as a line each
+export function hardwareExtraItems(extras: QuoteExtra[] | null | undefined): PrintItem[] {
+  return (extras ?? []).filter((e) => e.cost_in_materials && Number(e.cost) > 0).map((e) => ({
+    description: e.name,
+    part_number: null,
+    factory_cost: Number(e.cost),
+    quantity: 1,
+    line_total: Number(e.cost),
+    variant_label: null,
+  }))
+}
+
 function buildPrintWindow(opts: PrintQuoteOptions) {
   const {
     project_name, customer_name, mo_number, notes, items,
@@ -42,7 +55,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
   const ref = `LWD-${Date.now().toString(36).toUpperCase().slice(-6)}`
 
-  const itemRows = items.map((item) => `
+  const itemRows = [...items, ...hardwareExtraItems(extras)].map((item) => `
     <tr>
       <td>
         ${item.description}
@@ -308,7 +321,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
 
 // ── Print BOM only (no costs) ─────────────────────────────────
 export function printBOM(quote: Quote, baseUrl: string) {
-  const items = (quote.quote_items ?? []).map((item) => ({
+  const items = [...(quote.quote_items ?? []), ...hardwareExtraItems(quote.extras)].map((item) => ({
     description: item.description,
     part_number: item.part_number,
     quantity: item.quantity,
