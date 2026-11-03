@@ -1,5 +1,5 @@
 -- ============================================================
--- Rep-entered cost on extras (e.g. 10. Non-standard colour)
+-- Rep-entered cost on extras (10. Non-standard colour, 11. Brushed stainless finish)
 -- Run once in Supabase -> SQL Editor BEFORE deploying the code.
 -- Safe to run more than once.
 -- ============================================================
@@ -10,8 +10,9 @@
 -- so the quotes table needs no new column.
 alter table extras add column if not exists rep_priced boolean not null default false;
 
--- Non-standard colour: rep enters the cost, and make it tickable (it was greyed out)
-update extras set rep_priced = true, is_enabled = true where number = 10;
+-- Non-standard colour (10) and brushed stainless finish (11): rep enters the cost,
+-- and make them tickable (both were greyed out)
+update extras set rep_priced = true, is_enabled = true where number in (10, 11);
 
--- Check: should show extra 10 with rep_priced = true and is_enabled = true
-select number, name, is_enabled, rep_priced, labour_minutes from extras where number = 10;
+-- Check: should show extras 10 and 11 with rep_priced = true and is_enabled = true
+select number, name, is_enabled, rep_priced, labour_minutes, allowed_materials from extras where number in (10, 11);
