@@ -1,4 +1,4 @@
-import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, ExtraCountMap, ExtraCostMap, QuoteExtra } from '../types'
+import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, Product, ExtraCountMap, ExtraCostMap, QuoteExtra } from '../types'
 
 export const MATERIAL_LABELS: Record<CabinetMaterial, string> = {
   mild_steel: 'Mild steel (Zintec)',
@@ -26,6 +26,42 @@ export function contextFromPreset(preset: Preset, configurationId?: string): Bui
   const material: CabinetMaterial | null = code.startsWith('Z') ? 'mild_steel' : code.startsWith('S') ? 'stainless' : null
 
   return { rating, material, size }
+}
+
+// ── Read the pillar from a steelwork part ──────────────────────
+// Looks for the cabinet size ("Size 2"), the material ("Mild steel", "Zintec",
+// "Stainless") and the current rating ("100A", "EV12") in a piece of text.
+// Anything it can't find is left out, so it never clears what is already set.
+export function contextFromText(text: string): Partial<BuildContext> {
+  const out: Partial<BuildContext> = {}
+  const size = text.match(/\bsize\s*-?\s*(\d)\b/i)
+  if (size && SIZE_OPTIONS.includes(Number(size[1]))) out.size = Number(size[1])
+  if (/stainless|\bs\/?s\b/i.test(text)) out.material = 'stainless'
+  else if (/mild\s*steel|zintec|\bm\/?s\b/i.test(text)) out.material = 'mild_steel'
+  const amps = text.match(/\b(100|125|200|400|630)\s*a(mps?)?\b/i)
+  const code = text.match(/\bEV(10|12|20|40|63)(?![0-9])/i)
+  if (amps) out.rating = Number(amps[1])
+  else if (code) out.rating = RATING_BY_CODE[code[1]]
+  return out
+}
+
+// What a steelwork part says about the pillar. The description, part number and
+// chosen variant come first; the notes are only used for anything they don't say
+// (notes often mention other parts, e.g. "fits the size 1 internals").
+export function contextFromSteelwork(product: Product, variantLabel?: string | null): Partial<BuildContext> {
+  if (product.category !== 'Steelworks') return {}
+  const main = contextFromText([product.description, product.part_number, variantLabel].filter(Boolean).join(' '))
+  const fromNotes = product.notes ? contextFromText(product.notes) : {}
+  return { ...fromNotes, ...main }
+}
+
+// Fill in the fields a steelwork part gave, keep the rest as they are
+export function mergeContext(ctx: BuildContext, found: Partial<BuildContext>): BuildContext {
+  const next = { ...ctx }
+  if (found.rating != null) next.rating = found.rating
+  if (found.material != null) next.material = found.material
+  if (found.size != null) next.size = found.size
+  return next
 }
 
 // Why an extra can't be ticked for this build, or null if it can

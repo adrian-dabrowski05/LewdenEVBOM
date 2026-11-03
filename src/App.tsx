@@ -5,7 +5,7 @@ import type {
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
   Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild,
 } from './types'
-import { computeExtras, contextFromPreset, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
+import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -220,6 +220,14 @@ export default function App() {
         setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
       } else {
         newQtys[productId] = qty
+        // Picking a cabinet / steelwork part fills in the pillar's rating, material
+        // and size from what the part says. Only when it is first added, so a
+        // rep's own change to those boxes isn't undone by the + button.
+        if (prevQty <= 0) {
+          const product = products.find((p) => p.id === productId)
+          const found = product ? contextFromSteelwork(product) : {}
+          if (Object.keys(found).length > 0) setBuildContext((ctx) => mergeContext(ctx, found))
+        }
       }
       const productPrereqs = prereqs.filter((p) => p.product_id === productId)
       if (productPrereqs.length === 0) return newQtys
@@ -252,7 +260,7 @@ export default function App() {
       })
       return newQtys
     })
-  }, [prerequisites])
+  }, [prerequisites, products])
 
   // ── Apply preset (with optional configuration) ─────────────
   const applyPreset = useCallback((preset: Preset, configurationId?: string) => {
@@ -272,13 +280,20 @@ export default function App() {
       }
     }
 
-    setBuildContext(contextFromPreset(preset, configurationId))
+    // The preset name gives the rating, size and material; anything it doesn't
+    // give (e.g. a size 4 pillar) is read from the steelwork parts in the preset
+    const config = configurationId ? preset.preset_configurations?.find((c) => c.id === configurationId) : null
+    const presetIds = new Set([...(preset.preset_items ?? []), ...(config?.preset_configuration_items ?? [])].map((i) => i.product_id))
+    const fromSteel = products
+      .filter((p) => presetIds.has(p.id))
+      .reduce<BuildContext>((ctx, p) => mergeContext(ctx, contextFromSteelwork(p)), EMPTY_CONTEXT)
+    setBuildContext(mergeContext(fromSteel, contextFromPreset(preset, configurationId)))
 
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
-  }, [prerequisites, setQty, showToast])
+  }, [prerequisites, products, setQty, showToast])
 
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
@@ -489,7 +504,15 @@ export default function App() {
 
   const setVariantSelection = useCallback((productId: string, variantId: string) => {
     setVariantSelections((prev) => ({ ...prev, [productId]: variantId }))
-  }, [])
+    // A steelwork variant that names a size / material / rating (e.g. "Stainless")
+    // fills in that box too
+    const product = products.find((p) => p.id === productId)
+    const variant = variants.find((v) => v.id === variantId)
+    if (product?.category === 'Steelworks' && variant) {
+      const found = contextFromText(`${variant.label} ${variant.part_number_suffix ?? ''}`)
+      if (Object.keys(found).length > 0) setBuildContext((ctx) => mergeContext(ctx, found))
+    }
+  }, [products, variants])
 
   const activeCount = Object.values(extrasResult.effectiveQty).filter((q) => q > 0).length
 
