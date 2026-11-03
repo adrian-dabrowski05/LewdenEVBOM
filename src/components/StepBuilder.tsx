@@ -118,7 +118,7 @@ function placeOfExtra(e: Extra): string {
   if (EXTRA_PLACES[e.number]) return EXTRA_PLACES[e.number]
   const text = `${e.name} ${e.description ?? ''}`
   if (/surge/i.test(text)) return 'incomer'
-  if (/bus ?-?bar|copper/i.test(text)) return 'distribution'   // shown under the Distribution parts
+  if (/bus ?-?bar|\bbar\b|copper/i.test(text)) return 'distribution'   // shown under the Distribution parts
   return 'accessories'
 }
 
