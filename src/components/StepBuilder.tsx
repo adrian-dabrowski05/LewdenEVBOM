@@ -92,7 +92,7 @@ const OUTGOING_GROUPS: [string, RegExp][] = [
 ]
 
 // Which (sub)step each extra's tick box sits in, by extra number.
-// Anything not listed here (e.g. a new extra 14) shows in Accessories.
+// Anything not listed here goes by name (see placeOfExtra below).
 const EXTRA_PLACES: Record<number, string> = {
   11: 'steelwork.material',   // Brushed stainless finish
   10: 'steelwork.material',   // Non-standard colour (colour is picked as the cabinet's variant)
@@ -107,6 +107,12 @@ const EXTRA_PLACES: Record<number, string> = {
   8: 'outgoing',              // Photocell external lighting circuit
   7: 'accessories',           // Internal cabinet light
   12: 'accessories',          // Future proofing
+}
+
+// Extras not listed above go by their name: surge extras sit in Incomer
+// (after the others, as they are added later), anything else in Accessories
+function placeOfExtra(e: Extra): string {
+  return EXTRA_PLACES[e.number] ?? (/surge/i.test(`${e.name} ${e.description ?? ''}`) ? 'incomer' : 'accessories')
 }
 
 const SECTION_CATEGORIES: Partial<Record<SectionKey, string[]>> = {
@@ -204,7 +210,10 @@ export default function StepBuilder({
 
   const extrasByPlace = useMemo(() => {
     const map: Record<string, Extra[]> = {}
-    extras.forEach((e) => { (map[EXTRA_PLACES[e.number] ?? 'accessories'] ??= []).push(e) })
+    // Placed extras first, then the ones placed by name, so new ones sit at the bottom
+    const known = extras.filter((e) => EXTRA_PLACES[e.number] != null)
+    const added = extras.filter((e) => EXTRA_PLACES[e.number] == null)
+    ;[...known, ...added].forEach((e) => { (map[placeOfExtra(e)] ??= []).push(e) })
     return map
   }, [extras])
 
