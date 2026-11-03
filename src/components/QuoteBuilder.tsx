@@ -439,7 +439,7 @@ export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, 
             style={{ width: 120, fontFamily: 'var(--mono)' }}
           />
           <span style={{ fontSize: 12, color: applied.cost > 0 ? 'var(--text-3)' : 'var(--danger)' }}>
-            {applied.cost > 0 ? 'Added at face value: no uplift, no labour' : 'Enter the cost for this extra'}
+            {applied.cost <= 0 ? 'Enter the cost for this extra' : extra.rep_cost_uplift ? 'Added to materials, gets the hardware uplift' : 'Added at face value: no uplift, no labour'}
           </span>
         </div>
       )}
@@ -673,6 +673,7 @@ export default function QuoteBuilder({
   })
 
   const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
+    + extrasResult.repHardwareCost   // rep-entered extra costs that count as hardware
   const defaultUpliftPct = settings.hardware_uplift_pct
   const upliftPct = quoteForm.uplift_pct.trim() === '' ? defaultUpliftPct : (parseFloat(quoteForm.uplift_pct) || 0)
   const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
@@ -681,7 +682,7 @@ export default function QuoteBuilder({
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
   // Rep-entered extra costs (e.g. non-standard colour) go on at face value, after uplift and labour
-  const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
+  const costedExtras = extrasResult.applied.filter((a) => a.cost > 0 && !a.extra.rep_cost_uplift)   // hardware ones are already in materials
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
   const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost
   // Carriage stays out of the factory cost: no profit or rebate on it, added after the rebate

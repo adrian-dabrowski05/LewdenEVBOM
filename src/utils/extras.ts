@@ -112,7 +112,8 @@ export interface ExtrasResult {
   effectiveQty: QuantityMap   // final BOM quantities after extras
   delta: QuantityMap          // change made by extras per product (+/-)
   labourMinutes: number
-  repCost: number             // total of rep-entered extra costs, added at face value (no uplift, no labour)
+  repCost: number             // rep-entered extra costs added at face value (no uplift, no labour)
+  repHardwareCost: number     // rep-entered extra costs that count as hardware (in materials, so they get the uplift)
 }
 
 // Turn a typed £ amount into a number (blank, bad or negative = 0)
@@ -129,6 +130,7 @@ export function toQuoteExtras(applied: AppliedExtra[]): QuoteExtra[] {
     labour_minutes: Number(extra.labour_minutes) || 0,
     ...(extra.scales_with_bom ? { count } : {}),
     ...(extra.rep_priced ? { cost } : {}),
+    ...(extra.rep_priced && extra.rep_cost_uplift ? { cost_in_materials: true } : {}),
   }))
 }
 
@@ -140,12 +142,15 @@ export function toQuoteExtras(applied: AppliedExtra[]): QuoteExtra[] {
 // that is as many times as its Remove lines can be met (e.g. every Type A RCD
 // in the BOM); the rep can lower it with the stepper in the Extras panel.
 // A rep-priced extra (e.g. non-standard colour) carries the cost the rep typed in;
-// that cost is added to the quote at face value, with no uplift and no labour.
+// that cost is added to the quote at face value, with no uplift and no labour, unless
+// the extra is set to count it as hardware (rep_cost_uplift): then it goes in with the
+// materials and gets the hardware uplift.
 export function computeExtras(extras: Extra[], selected: Set<string>, ctx: BuildContext, baseQty: QuantityMap, counts: ExtraCountMap = {}, costs: ExtraCostMap = {}): ExtrasResult {
   const qty: QuantityMap = { ...baseQty }
   const applied: AppliedExtra[] = []
   let labourMinutes = 0
   let repCost = 0
+  let repHardwareCost = 0
 
   const ticked = extras
     .filter((e) => selected.has(e.id) && extraUnavailableReason(e, ctx) == null)
@@ -182,7 +187,8 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
 
     labourMinutes += Number(extra.labour_minutes) || 0
     const cost = extra.rep_priced ? parseCost(costs[extra.id]) : 0
-    repCost += cost
+    if (extra.rep_cost_uplift) repHardwareCost += cost
+    else repCost += cost
     applied.push({ extra, lines, count, maxCount, cost })
   })
 
@@ -195,5 +201,5 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     if (finalQty > 0) effectiveQty[id] = finalQty
   })
 
-  return { applied, effectiveQty, delta, labourMinutes, repCost }
+  return { applied, effectiveQty, delta, labourMinutes, repCost, repHardwareCost }
 }

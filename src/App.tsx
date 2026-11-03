@@ -338,6 +338,7 @@ export default function App() {
     if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
     const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
+    + extrasResult.repHardwareCost   // rep-entered extra costs that count as hardware
     const upliftPct = formData.uplift_pct.trim() === '' ? settings.hardware_uplift_pct : (parseFloat(formData.uplift_pct) || 0)
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
     const labourMinutes = (parseFloat(formData.labour_minutes) || 0) + extrasResult.labourMinutes
