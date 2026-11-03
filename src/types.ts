@@ -69,6 +69,7 @@ export interface Quote {
   labour_minutes: number
   labour_rate_per_min: number
   labour_total: number
+  carriage?: number | null   // charged at face value, added after uplift and labour
   status: QuoteStatus
   extras?: QuoteExtra[] | null
   build?: QuoteBuild | null
@@ -149,6 +150,7 @@ export interface QuoteFormData {
   notes: string
   labour_minutes: string
   uplift_pct: string   // blank = use the admin default
+  carriage: string     // £, no uplift or labour on it; blank = none
 }
 
 export interface AppSettings {

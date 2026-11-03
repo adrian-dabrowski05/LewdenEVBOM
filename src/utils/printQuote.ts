@@ -21,6 +21,7 @@ interface PrintQuoteOptions {
   labourMinutes: number
   labourRatePerMin: number
   labourTotal: number
+  carriage?: number
   grandTotal: number
   baseUrl: string
   extras?: QuoteExtra[]
@@ -56,6 +57,14 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     <tr class="summary-row labour-row">
       <td colspan="4" class="right label">Labour (${labourMinutes} min${extrasLabour > 0 ? `, incl. ${extrasLabour} for extras` : ''} @ £${labourRatePerMin.toFixed(4)}/min)</td>
       <td class="right">£${labourTotal.toFixed(2)}</td>
+    </tr>
+  ` : ''
+
+  const carriage = Number(opts.carriage) || 0
+  const carriageRow = carriage > 0 ? `
+    <tr class="summary-row">
+      <td colspan="4" class="right label">Carriage</td>
+      <td class="right">£${carriage.toFixed(2)}</td>
     </tr>
   ` : ''
 
@@ -181,6 +190,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
       </tr>
       ${upliftRow}
       ${labourRow}
+      ${carriageRow}
       <tr class="total-row">
         <td colspan="4" class="right">Grand total</td>
         <td class="right">£${grandTotal.toFixed(2)}</td>
@@ -209,6 +219,7 @@ export interface PrintFromBuilderOptions {
   labourMinutes: number
   labourRatePerMin: number
   labourTotal: number
+  carriage?: number
   grandTotal: number
   baseUrl: string
   extras?: QuoteExtra[]
@@ -227,6 +238,7 @@ export function printQuote(opts: PrintFromBuilderOptions) {
     labourMinutes: opts.labourMinutes,
     labourRatePerMin: opts.labourRatePerMin,
     labourTotal: opts.labourTotal,
+    carriage: opts.carriage,
     grandTotal: opts.grandTotal,
     baseUrl: opts.baseUrl,
     extras: opts.extras,
@@ -257,6 +269,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
     labourMinutes: quote.labour_minutes ?? 0,
     labourRatePerMin: quote.labour_rate_per_min ?? 0,
     labourTotal: quote.labour_total ?? 0,
+    carriage: Number(quote.carriage) || 0,
     grandTotal: quote.grand_total ?? 0,
     baseUrl,
     extras: quote.extras ?? [],

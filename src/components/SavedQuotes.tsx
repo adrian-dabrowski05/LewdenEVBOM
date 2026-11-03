@@ -278,6 +278,12 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                           <span style={{ color: 'var(--brand)' }}>{fmt(q.labour_total)}</span>
                         </div>
                       )}
+                      {Number(q.carriage) > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                          <span style={{ color: 'var(--text-2)' }}>Carriage</span>
+                          <span>{fmt(Number(q.carriage))}</span>
+                        </div>
+                      )}
                       <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
                         <span>Grand total</span>
                         <span>{fmt(q.grand_total)}</span>

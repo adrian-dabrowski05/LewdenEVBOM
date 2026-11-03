@@ -42,7 +42,7 @@ interface Props {
 
 export const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
 
-const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '' }
+const EMPTY_FORM: QuoteFormData = { project_name: '', customer_name: '', mo_number: '', notes: '', labour_minutes: '', uplift_pct: '', carriage: '' }
 
 export function getDisplayPartNumber(product: Product, variant: ProductVariant | null): string | null {
   if (!variant) return product.part_number
@@ -551,7 +551,9 @@ export default function QuoteBuilder({
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
-  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal
+  // Carriage goes on at face value, after uplift and labour
+  const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
+  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + carriage
 
   const handleClear = () => {
     if (activeCount === 0) return
@@ -580,6 +582,14 @@ export default function QuoteBuilder({
     setQuoteForm({ ...quoteForm, uplift_pct: value })
   }
 
+  const setCarriage = (value: string) => {
+    if (value.trim() !== '') {
+      const n = parseFloat(value)
+      if (!isNaN(n) && n < 0) return
+    }
+    setQuoteForm({ ...quoteForm, carriage: value })
+  }
+
   const handlePdf = () => {
     if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
     printQuote({
@@ -598,7 +608,7 @@ export default function QuoteBuilder({
       }),
       extras: extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) })),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
-      labourMinutes, labourRatePerMin: labourRate, labourTotal, grandTotal,
+      labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, grandTotal,
       baseUrl: (import.meta as any).env.BASE_URL,
     })
   }
@@ -736,6 +746,18 @@ export default function QuoteBuilder({
                     <span>Default is {defaultUpliftPct}%</span>
                     <button className="btn btn-sm" onClick={() => setQuoteForm({ ...quoteForm, uplift_pct: '' })}>Use default</button>
                   </>}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 8 }}>Carriage</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Carriage (£)</label>
+              <input className="input" type="number" min="0" step="0.01" placeholder="0.00" value={quoteForm.carriage} onChange={(e) => setCarriage(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
+            </div>
+            <div style={{ paddingBottom: 1, fontSize: 12, color: 'var(--text-3)', minHeight: 42, display: 'flex', alignItems: 'center' }}>
+              <span>Added at face value: no uplift, no labour</span>
             </div>
           </div>
         </div>
@@ -878,6 +900,12 @@ export default function QuoteBuilder({
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                 <span style={{ color: 'var(--brand)', display: 'flex', alignItems: 'center', gap: 6 }}>Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min{extrasLabourMinutes > 0 ? `, incl. ${extrasLabourMinutes} for extras` : ''} @ £{labourRate.toFixed(4)}/min)</span></span>
                 <span style={{ fontWeight: 500, color: 'var(--brand)' }}>£{labourTotal.toFixed(2)}</span>
+              </div>
+            )}
+            {carriage > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                <span style={{ color: 'var(--text-2)' }}>Carriage</span>
+                <span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span>
               </div>
             )}
             <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700 }}>
