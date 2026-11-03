@@ -569,11 +569,17 @@ export function ProfitRebateRows({ pricing, gpValue, rebateValue, onGpChange, on
         </span>
         <span style={{ fontWeight: 500, color: 'var(--danger)' }}>−£{pricing.rebateAmount.toFixed(2)}</span>
       </div>
+      {pricing.carriage > 0 && (
+        <div style={row}>
+          <span style={{ color: 'var(--text-2)' }}>Carriage <span style={{ fontSize: 12, color: 'var(--text-3)' }}>(no profit or rebate)</span></span>
+          <span style={{ fontWeight: 500 }}>+£{pricing.carriage.toFixed(2)}</span>
+        </div>
+      )}
       <div style={{ ...row, borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, fontSize: 17, fontWeight: 700, color: 'var(--brand)' }}>
         <span>Total quote</span><span>£{pricing.totalQuote.toFixed(2)}</span>
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-        {GP_MODE === 'margin' ? 'Gross profit is a margin: it is that % of the quote price.' : 'Gross profit is a markup: it is that % of the factory cost.'} Rebate comes off the quote price.
+        {GP_MODE === 'margin' ? 'Gross profit is a margin: it is that % of the quote price.' : 'Gross profit is a markup: it is that % of the factory cost.'} Rebate comes off the quote price. Carriage is added after the rebate.
       </div>
     </>
   )
@@ -674,11 +680,12 @@ export default function QuoteBuilder({
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
-  // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
+  // Rep-entered extra costs (e.g. non-standard colour) go on at face value, after uplift and labour
   const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
-  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct)
+  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost
+  // Carriage stays out of the factory cost: no profit or rebate on it, added after the rebate
+  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct, carriage)
 
   const handleClear = () => {
     if (activeCount === 0) return
@@ -882,7 +889,7 @@ export default function QuoteBuilder({
               <input className="input" type="number" min="0" step="0.01" placeholder="0.00" value={quoteForm.carriage} onChange={(e) => setCarriage(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
             </div>
             <div style={{ paddingBottom: 1, fontSize: 12, color: 'var(--text-3)', minHeight: 42, display: 'flex', alignItems: 'center' }}>
-              <span>Added at face value: no uplift, no labour</span>
+              <span>Added after the rebate: no uplift, profit or rebate</span>
             </div>
           </div>
         </div>
@@ -1051,12 +1058,6 @@ export default function QuoteBuilder({
                 <span style={{ fontWeight: 500 }}>£{cost.toFixed(2)}</span>
               </div>
             ))}
-            {carriage > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                <span style={{ color: 'var(--text-2)' }}>Carriage</span>
-                <span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span>
-              </div>
-            )}
             <ProfitRebateRows
               pricing={pricing}
               gpValue={quoteForm.gp_pct}

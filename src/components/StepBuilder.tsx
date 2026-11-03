@@ -239,11 +239,12 @@ export default function StepBuilder({
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
-  // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
+  // Rep-entered extra costs (e.g. non-standard colour) go on at face value, after uplift and labour
   const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
-  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct)
+  const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost
+  // Carriage stays out of the factory cost: no profit or rebate on it, added after the rebate
+  const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct, carriage)
 
   const missingVariants = activeItems.filter((p) => (variantsByProduct[p.id]?.length ?? 0) > 0 && !variantSelections[p.id])
 
@@ -459,7 +460,7 @@ export default function StepBuilder({
           <div style={{ flex: '1 1 160px' }}>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>Carriage (£)</label>
             <input className="input" type="number" min="0" step="0.01" placeholder="0.00" value={quoteForm.carriage} onChange={(e) => setCarriage(e.target.value)} style={{ fontFamily: 'var(--mono)' }} />
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>Face value: no uplift, no labour</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>Added after the rebate: no profit or rebate</div>
           </div>
         </div>
       </div>
@@ -513,7 +514,6 @@ export default function StepBuilder({
             <span style={{ fontWeight: 500 }}>£{labourTotal.toFixed(2)}</span>
           </div>
           {costedExtras.map(({ extra, cost }) => <div key={extra.id} style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>{extra.name}</span><span style={{ fontWeight: 500 }}>£{cost.toFixed(2)}</span></div>)}
-          {carriage > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>Carriage</span><span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span></div>}
           <ProfitRebateRows
             pricing={pricing}
             gpValue={quoteForm.gp_pct}

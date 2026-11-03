@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Quote, QuoteStatus } from '../types'
 import SearchBar from './SearchBar'
 import { printSavedQuote, printBOM } from '../utils/printQuote'
-import { quotePricing } from '../utils/pricing'
+import { savedQuotePricing } from '../utils/pricing'
 
 interface Props {
   quotes: Quote[]
@@ -147,7 +147,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
           const isConfirming = confirmDelete === q.id
           const items = q.quote_items ?? []
           const hasLabour = (q.labour_total ?? 0) > 0
-          const pricing = quotePricing(Number(q.grand_total) || 0, q.gross_profit_pct, q.rebate_pct)
+          const pricing = savedQuotePricing(q)
           const hasUplift = (q.hardware_uplift_amount ?? 0) > 0
 
           return (
@@ -289,12 +289,6 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                           <span>{fmt(Number(e.cost))}</span>
                         </div>
                       ))}
-                      {Number(q.carriage) > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                          <span style={{ color: 'var(--text-2)' }}>Carriage</span>
-                          <span>{fmt(Number(q.carriage))}</span>
-                        </div>
-                      )}
                       <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700 }}>
                         <span>Factory cost</span>
                         <span>{fmt(pricing.factoryCost)}</span>
@@ -311,6 +305,12 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                         <span style={{ color: 'var(--text-2)' }}>Rebate ({pricing.rebatePct}%)</span>
                         <span style={{ color: 'var(--danger)' }}>−{fmt(pricing.rebateAmount)}</span>
                       </div>
+                      {pricing.carriage > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                          <span style={{ color: 'var(--text-2)' }}>Carriage</span>
+                          <span>+{fmt(pricing.carriage)}</span>
+                        </div>
+                      )}
                       <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700, color: 'var(--brand)' }}>
                         <span>Total quote</span>
                         <span>{fmt(pricing.totalQuote)}</span>

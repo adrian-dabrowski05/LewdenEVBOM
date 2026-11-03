@@ -345,9 +345,10 @@ export default function App() {
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const carriage = Math.max(0, parseFloat(formData.carriage) || 0)
-    // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
-    const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
-    const pricing = quotePricing(factoryCost, formData.gp_pct, formData.rebate_pct)
+    // Rep-entered extra costs (e.g. non-standard colour) go on at face value, after uplift and labour
+    const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost
+    // Carriage: no profit or rebate on it, added after the rebate
+    const pricing = quotePricing(factoryCost, formData.gp_pct, formData.rebate_pct, carriage)
     const build: QuoteBuild = {
       base_quantities: quantities,
       variant_selections: variantSelections,
@@ -364,7 +365,7 @@ export default function App() {
       customer_name: formData.customer_name.trim() || null,
       mo_number: formData.mo_number.trim() || null,
       notes: formData.notes.trim() || null,
-      grand_total: factoryCost,   // "Factory cost" in the app
+      grand_total: factoryCost + carriage,   // factory cost + carriage, as before (the app shows factory cost = this - carriage)
       gross_profit_pct: pricing.gpPct,
       quote_price: pricing.quotePrice,
       rebate_pct: pricing.rebatePct,
