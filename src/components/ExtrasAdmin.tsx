@@ -16,6 +16,7 @@ interface MetaBuffer {
   allowed_ratings: number[]
   allowed_materials: CabinetMaterial[]
   scales_with_bom: boolean
+  rep_priced: boolean
 }
 
 const toBuffer = (e: Extra): MetaBuffer => ({
@@ -26,6 +27,7 @@ const toBuffer = (e: Extra): MetaBuffer => ({
   allowed_ratings: e.allowed_ratings ?? [],
   allowed_materials: e.allowed_materials ?? [],
   scales_with_bom: e.scales_with_bom ?? false,
+  rep_priced: e.rep_priced ?? false,
 })
 
 function toggleIn<T>(list: T[], value: T): T[] {
@@ -198,6 +200,8 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
     if (!buf) return
     if (!buf.name.trim()) { showToast('Name is required', 'error'); return }
     setSaving(true)
+    // Only send rep_priced when it changed, so editing still works before the SQL is run
+    const repPricedChanged = buf.rep_priced !== (extras.find((e) => e.id === id)?.rep_priced ?? false)
     const { error } = await supabase.from('extras').update({
       name: buf.name.trim(),
       description: buf.description.trim() || null,
@@ -206,9 +210,13 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
       allowed_ratings: buf.allowed_ratings.length ? [...buf.allowed_ratings].sort((a, b) => a - b) : null,
       allowed_materials: buf.allowed_materials.length ? buf.allowed_materials : null,
       scales_with_bom: buf.scales_with_bom,
+      ...(repPricedChanged ? { rep_priced: buf.rep_priced } : {}),
     }).eq('id', id)
     setSaving(false)
-    if (error) { showToast('Failed to save extra', 'error'); return }
+    if (error) {
+      showToast(/rep_priced/.test(error.message) ? 'Run supabase/extra-rep-cost.sql in Supabase first' : `Failed to save extra: ${error.message}`, 'error')
+      return
+    }
     showToast('Extra saved'); setEditingId(null); setBuf(null); onRefresh()
   }
 
@@ -268,6 +276,13 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                           {buf.scales_with_bom ? 'Lines repeat for each one' : 'Applies once'}
                         </label>
                       </div>
+                      <div>
+                        <label style={smallLabel}>Rep enters the cost</label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, height: 34, cursor: 'pointer' }} title="Shows a £ box when ticked. The rep's cost is added at face value: no hardware uplift, no labour.">
+                          <input type="checkbox" checked={buf.rep_priced} onChange={(e) => setBuf({ ...buf, rep_priced: e.target.checked })} />
+                          {buf.rep_priced ? 'Face value, no uplift' : 'No cost box'}
+                        </label>
+                      </div>
                     </div>
                     <div style={{ marginBottom: 10 }}>
                       <label style={smallLabel}>Only for these current ratings (none ticked = any)</label>
@@ -306,6 +321,7 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                       {Number(extra.labour_minutes) > 0 && <span style={{ color: 'var(--brand)' }}>+{extra.labour_minutes} min labour</span>}
                       {(extra.allowed_ratings ?? []).length > 0 && <span>{(extra.allowed_ratings ?? []).map((r) => `${r}A`).join(' / ')} only</span>}
                       {extra.scales_with_bom && <span>Rep picks how many</span>}
+                      {extra.rep_priced && <span>Rep enters the cost</span>}
                       {(extra.allowed_materials ?? []).length > 0 && <span>{(extra.allowed_materials ?? []).map((m) => MATERIAL_LABELS[m] ?? m).join(' / ')} only</span>}
                     </div>
                   </>

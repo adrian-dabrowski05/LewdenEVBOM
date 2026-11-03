@@ -3,9 +3,9 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, QuoteExtra, ExtraCountMap, QuoteBuild,
+  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild,
 } from './types'
-import { computeExtras, contextFromPreset, EMPTY_CONTEXT } from './utils/extras'
+import { computeExtras, contextFromPreset, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -50,6 +50,7 @@ export default function App() {
   const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
   const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
   const [extraCounts, setExtraCounts] = useState<ExtraCountMap>({})
+  const [extraCosts, setExtraCosts] = useState<ExtraCostMap>({})
   const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
   const [editingQuote, setEditingQuote] = useState<EditingQuote | null>(null)
 
@@ -182,12 +183,17 @@ export default function App() {
     setExtraCounts((prev) => ({ ...prev, [extraId]: Math.max(0, count) }))
   }, [])
 
-  const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}) }, [])
+  // Cost the rep types in for a rep-priced extra (e.g. non-standard colour)
+  const setExtraCost = useCallback((extraId: string, value: string) => {
+    setExtraCosts((prev) => ({ ...prev, [extraId]: value }))
+  }, [])
+
+  const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}); setExtraCosts({}) }, [])
 
   // Final BOM = rep's quantities with the ticked extras applied on top
   const extrasResult = useMemo(
-    () => computeExtras(extras, selectedExtras, buildContext, quantities, extraCounts),
-    [extras, selectedExtras, buildContext, quantities, extraCounts],
+    () => computeExtras(extras, selectedExtras, buildContext, quantities, extraCounts, extraCosts),
+    [extras, selectedExtras, buildContext, quantities, extraCounts, extraCosts],
   )
 
   useEffect(() => { loadSettings() }, [])
@@ -291,6 +297,7 @@ export default function App() {
     setQuoteForm(DEFAULT_FORM)
     setSelectedExtras(new Set())
     setExtraCounts({})
+    setExtraCosts({})
     setBuildContext(EMPTY_CONTEXT)
     setEditingQuote(null)
   }, [])
@@ -305,18 +312,19 @@ export default function App() {
     const upliftPct = formData.uplift_pct.trim() === '' ? settings.hardware_uplift_pct : (parseFloat(formData.uplift_pct) || 0)
     const hardwareUpliftAmount = materialsSubtotal * upliftPct / 100
     const labourMinutes = (parseFloat(formData.labour_minutes) || 0) + extrasResult.labourMinutes
-    const quoteExtras: QuoteExtra[] = extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) }))
+    const quoteExtras = toQuoteExtras(extrasResult.applied)
     const labourRate = settings.labour_rate_per_min
     const labourTotal = labourMinutes * labourRate
     const carriage = Math.max(0, parseFloat(formData.carriage) || 0)
-    // Carriage goes on at face value, after uplift and labour
-    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + carriage
+    // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
+    const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
     const build: QuoteBuild = {
       base_quantities: quantities,
       variant_selections: variantSelections,
       auto_added: autoAdded,
       selected_extras: Array.from(selectedExtras),
       extra_counts: extraCounts,
+      extra_costs: extraCosts,
       build_context: buildContext,
       labour_minutes: formData.labour_minutes,
     }
@@ -426,6 +434,7 @@ export default function App() {
     setAutoAdded(build?.auto_added ?? {})
     setSelectedExtras(new Set((build?.selected_extras ?? []).filter((id) => extraIds.has(id))))
     setExtraCounts(build?.extra_counts ?? {})
+    setExtraCosts(build?.extra_costs ?? {})
     setBuildContext(build?.build_context ?? EMPTY_CONTEXT)
     setQuoteForm({
       project_name: quote.project_name,
@@ -510,6 +519,8 @@ export default function App() {
             selectedExtras,
             onToggleExtra: toggleExtra,
             onSetExtraCount: setExtraCount,
+            extraCosts,
+            onSetExtraCost: setExtraCost,
             onClearExtras: clearExtras,
             extrasResult,
             buildContext,

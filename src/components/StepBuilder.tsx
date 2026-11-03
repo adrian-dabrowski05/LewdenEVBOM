@@ -2,11 +2,12 @@ import { useState, useMemo } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
-  QuoteFormData, AppSettings, Extra, BuildContext,
+  QuoteFormData, AppSettings, Extra, BuildContext, ExtraCostMap,
 } from '../types'
 import { EXTRAS_CATEGORY } from '../types'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult } from '../utils/extras'
+import { toQuoteExtras } from '../utils/extras'
 import type { EditingQuote } from '../App'
 import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner } from './QuoteBuilder'
 
@@ -34,6 +35,8 @@ interface Props {
   selectedExtras: Set<string>
   onToggleExtra: (extraId: string) => void
   onSetExtraCount: (extraId: string, count: number) => void
+  extraCosts: ExtraCostMap
+  onSetExtraCost: (extraId: string, value: string) => void
   onClearExtras: () => void
   extrasResult: ExtrasResult
   buildContext: BuildContext
@@ -163,7 +166,7 @@ export default function StepBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
@@ -231,9 +234,10 @@ export default function StepBuilder({
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
-  // Carriage goes on at face value, after uplift and labour
+  // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
+  const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + carriage
+  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
 
   const missingVariants = activeItems.filter((p) => (variantsByProduct[p.id]?.length ?? 0) > 0 && !variantSelections[p.id])
 
@@ -318,7 +322,7 @@ export default function StepBuilder({
           variant_label: selectedVariant?.label ?? null,
         }
       }),
-      extras: extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) })),
+      extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, grandTotal,
       baseUrl: (import.meta as any).env.BASE_URL,
@@ -415,7 +419,7 @@ export default function StepBuilder({
         <div style={sectionTitleStyle}>Extras</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {list.map((extra, idx) => (
-            <ExtraRow key={extra.id} extra={extra} ctx={buildContext} isTicked={selectedExtras.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggleExtra} onSetCount={onSetExtraCount} productsById={productsById}
+            <ExtraRow key={extra.id} extra={extra} ctx={buildContext} isTicked={selectedExtras.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggleExtra} onSetCount={onSetExtraCount} costValue={extraCosts[extra.id] ?? ''} onSetCost={onSetExtraCost} productsById={productsById}
               move={reorderMode ? { index: idx, count: list.length, disabled: reordering, onMove: (dir) => onMoveExtra(extra.id, list.map((e) => e.id), dir) } : undefined} />
           ))}
         </div>
@@ -502,6 +506,7 @@ export default function StepBuilder({
             <span style={{ color: 'var(--text-2)' }}>Labour <span style={{ fontSize: 12, color: 'var(--text-3)' }}>({labourMinutes} min{extrasLabourMinutes > 0 ? `, incl. ${extrasLabourMinutes} for extras` : ''}{labourRate > 0 ? ` @ £${labourRate.toFixed(4)}/min` : ''})</span></span>
             <span style={{ fontWeight: 500 }}>£{labourTotal.toFixed(2)}</span>
           </div>
+          {costedExtras.map(({ extra, cost }) => <div key={extra.id} style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>{extra.name}</span><span style={{ fontWeight: 500 }}>£{cost.toFixed(2)}</span></div>)}
           {carriage > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--text-2)' }}>Carriage</span><span style={{ fontWeight: 500 }}>£{carriage.toFixed(2)}</span></div>}
           <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 8, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 700 }}><span>Grand total</span><span>£{grandTotal.toFixed(2)}</span></div>
         </div>

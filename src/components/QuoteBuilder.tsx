@@ -2,14 +2,14 @@ import { useState, useMemo } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset, PresetConfiguration,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
-  QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial,
+  QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial, ExtraCostMap,
 } from '../types'
 import { CATEGORIES, EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult, AppliedExtra } from '../utils/extras'
 import type { EditingQuote } from '../App'
-import { extraUnavailableReason, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
+import { extraUnavailableReason, toQuoteExtras, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
 
 interface Props {
   products: Product[]
@@ -32,6 +32,8 @@ interface Props {
   selectedExtras: Set<string>
   onToggleExtra: (extraId: string) => void
   onSetExtraCount: (extraId: string, count: number) => void
+  extraCosts: ExtraCostMap
+  onSetExtraCost: (extraId: string, value: string) => void
   onClearExtras: () => void
   extrasResult: ExtrasResult
   buildContext: BuildContext
@@ -376,13 +378,15 @@ export function PresetsBar({ presets, products, onApply }: {
 }
 
 // ── One extra as a tick box (used by the Extras panel and the step-by-step builder) ──
-export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, productsById, move }: {
+export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, costValue, onSetCost, productsById, move }: {
   extra: Extra
   ctx: BuildContext
   isTicked: boolean
   applied: AppliedExtra | undefined
   onToggle: (extraId: string) => void
   onSetCount: (extraId: string, count: number) => void
+  costValue: string
+  onSetCost: (extraId: string, value: string) => void
   productsById: Record<string, Product>
   move?: { index: number; count: number; disabled?: boolean; onMove: (dir: -1 | 1) => void }
 }) {
@@ -420,6 +424,22 @@ export function ExtraRow({ extra, ctx, isTicked, applied, onToggle, onSetCount, 
           </div>
         )
       })()}
+      {applied && extra.rep_priced && (
+        <div style={{ marginTop: 8, marginLeft: 26, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <label htmlFor={`extra-cost-${extra.id}`} style={{ fontSize: 13, color: 'var(--text-2)' }}>Cost (£)</label>
+          <input
+            id={`extra-cost-${extra.id}`}
+            className="input input-sm"
+            type="number" min="0" step="0.01" placeholder="0.00"
+            value={costValue}
+            onChange={(e) => { const n = parseFloat(e.target.value); if (e.target.value.trim() === '' || isNaN(n) || n >= 0) onSetCost(extra.id, e.target.value) }}
+            style={{ width: 120, fontFamily: 'var(--mono)' }}
+          />
+          <span style={{ fontSize: 12, color: applied.cost > 0 ? 'var(--text-3)' : 'var(--danger)' }}>
+            {applied.cost > 0 ? 'Added at face value: no uplift, no labour' : 'Enter the cost for this extra'}
+          </span>
+        </div>
+      )}
       {lines.length > 0 && (
         <div style={{ marginTop: 6, marginLeft: 26, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {lines.map((l, i) => {
@@ -471,11 +491,13 @@ export function BuildContextFields({ ctx, setCtx }: { ctx: BuildContext; setCtx:
 }
 
 // ── Extras panel ───────────────────────────────────────────────
-function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setCtx, productsById, reorderMode, reordering, onMoveExtra }: {
+function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost, result, ctx, setCtx, productsById, reorderMode, reordering, onMoveExtra }: {
   extras: Extra[]
   selected: Set<string>
   onToggle: (extraId: string) => void
   onSetCount: (extraId: string, count: number) => void
+  costs: ExtraCostMap
+  onSetCost: (extraId: string, value: string) => void
   result: ExtrasResult
   ctx: BuildContext
   setCtx: (ctx: BuildContext) => void
@@ -499,7 +521,7 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, result, ctx, setC
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {extras.map((extra, i) => {
           const move = reorderMode ? { index: i, count: extras.length, disabled: reordering, onMove: (dir: -1 | 1) => onMoveExtra(extra.id, ids, dir) } : undefined
-          return <ExtraRow key={extra.id} extra={extra} ctx={ctx} isTicked={selected.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggle} onSetCount={onSetCount} productsById={productsById} move={move} />
+          return <ExtraRow key={extra.id} extra={extra} ctx={ctx} isTicked={selected.has(extra.id)} applied={appliedById[extra.id]} onToggle={onToggle} onSetCount={onSetCount} costValue={costs[extra.id] ?? ''} onSetCost={onSetCost} productsById={productsById} move={move} />
         })}
       </div>
     </div>
@@ -511,7 +533,7 @@ export default function QuoteBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onSetExtraCount, onClearExtras, extrasResult, buildContext, setBuildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
@@ -601,9 +623,10 @@ export default function QuoteBuilder({
   const labourMinutes = (parseFloat(quoteForm.labour_minutes) || 0) + extrasLabourMinutes
   const labourRate = settings.labour_rate_per_min
   const labourTotal = labourMinutes * labourRate
-  // Carriage goes on at face value, after uplift and labour
+  // Rep-entered extra costs (e.g. non-standard colour) and carriage go on at face value, after uplift and labour
+  const costedExtras = extrasResult.applied.filter((a) => a.cost > 0)
   const carriage = Math.max(0, parseFloat(quoteForm.carriage) || 0)
-  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + carriage
+  const grandTotal = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost + carriage
 
   const handleClear = () => {
     if (activeCount === 0) return
@@ -656,7 +679,7 @@ export default function QuoteBuilder({
           variant_label: selectedVariant?.label ?? null,
         }
       }),
-      extras: extrasResult.applied.map(({ extra, count }) => ({ number: extra.number, name: extra.name, labour_minutes: Number(extra.labour_minutes) || 0, ...(extra.scales_with_bom ? { count } : {}) })),
+      extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, grandTotal,
       baseUrl: (import.meta as any).env.BASE_URL,
@@ -815,7 +838,7 @@ export default function QuoteBuilder({
 
       {reorderMode && <ReorderBanner />}
 
-      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} reorderMode={reorderMode} reordering={reordering} onMoveExtra={onMoveExtra} />
+      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} costs={extraCosts} onSetCost={onSetExtraCost} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} reorderMode={reorderMode} reordering={reordering} onMoveExtra={onMoveExtra} />
 
       <div className="toolbar" style={isAdmin ? { display: 'flex', gap: 8, alignItems: 'center' } : undefined}>
         <div style={{ flex: 1, minWidth: 0 }}><SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" /></div>
@@ -970,6 +993,12 @@ export default function QuoteBuilder({
                 <span style={{ fontWeight: 500, color: 'var(--brand)' }}>£{labourTotal.toFixed(2)}</span>
               </div>
             )}
+            {costedExtras.map(({ extra, cost }) => (
+              <div key={extra.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                <span style={{ color: 'var(--text-2)' }}>{extra.name}</span>
+                <span style={{ fontWeight: 500 }}>£{cost.toFixed(2)}</span>
+              </div>
+            ))}
             {carriage > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                 <span style={{ color: 'var(--text-2)' }}>Carriage</span>
