@@ -45,7 +45,7 @@ interface Props {
 // ── Where every part and extra goes ────────────────────────────
 
 type SectionKey = 'steelwork' | 'incomer' | 'distribution' | 'outgoing' | 'accessories' | 'review'
-type SteelKey = 'material' | 'colour' | 'internals' | 'gasket' | 'label' | 'root' | 'other'
+type SteelKey = 'material' | 'internals' | 'gasket' | 'label' | 'root' | 'other'
 
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
   { key: 'steelwork', label: 'Steelwork', hint: 'The cabinet, step by step.' },
@@ -57,8 +57,7 @@ const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
 ]
 
 const STEEL_STEPS: { key: SteelKey; label: string; hint: string }[] = [
-  { key: 'material', label: 'Material', hint: 'Pick the cabinet. Start from a preset if you like, and set the rating, material and size so the right extras are offered.' },
-  { key: 'colour', label: 'Colour', hint: 'Paint, powder coat and primer.' },
+  { key: 'material', label: 'Material', hint: 'Pick the cabinet and its colour (the variant). Start from a preset if you like, and set the rating, material and size so the right extras are offered.' },
   { key: 'internals', label: 'Internals', hint: 'Gear trays, mounting plates, brackets and DIN rail.' },
   { key: 'gasket', label: 'Rubber gasket', hint: 'Door seals and gaskets.' },
   { key: 'label', label: 'Danger label', hint: 'Danger and warning labels.' },
@@ -72,7 +71,6 @@ const STEEL_RULES: [SteelKey, RegExp][] = [
   ['gasket', /gasket|rubber|seal/i],
   ['label', /label|danger|warning|sticker|sign\b/i],
   ['root', /\broots?\b|plinth|ground|buried|base frame/i],
-  ['colour', /colou?r|paint|powder|\bral\b|primer|coat/i],
   ['internals', /internal|gear ?tray|mounting plate|back ?plate|chassis|din ?rail|bracket|gland/i],
   ['material', /cabinet|enclosure|pillar|housing|body|zintec|stainless|mild steel|door|kiosk/i],
 ]
@@ -92,8 +90,8 @@ const OUTGOING_GROUPS: [string, RegExp][] = [
 // Anything not listed here (e.g. a new extra 14) shows in Accessories.
 const EXTRA_PLACES: Record<number, string> = {
   11: 'steelwork.material',   // Brushed stainless finish
-  10: 'steelwork.colour',     // Non-standard colour
-  13: 'steelwork.colour',     // Zinc rich base coat primer
+  10: 'steelwork.material',   // Non-standard colour (colour is picked as the cabinet's variant)
+  13: 'steelwork.material',   // Zinc rich base coat primer
   2: 'incomer',               // Type 1 surge protection
   3: 'incomer',               // MCCB incomer
   4: 'incomer',               // Open PEN fault protection
@@ -171,7 +169,7 @@ export default function StepBuilder({
   }, [catalogue])
 
   const bySteelStep = useMemo(() => {
-    const map: Record<SteelKey, Product[]> = { material: [], colour: [], internals: [], gasket: [], label: [], root: [], other: [] }
+    const map: Record<SteelKey, Product[]> = { material: [], internals: [], gasket: [], label: [], root: [], other: [] }
     bySection.steelwork.forEach((p) => map[steelStepOf(p)].push(p))
     return map
   }, [bySection])
