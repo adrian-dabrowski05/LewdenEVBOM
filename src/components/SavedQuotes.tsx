@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Quote, QuoteStatus } from '../types'
 import SearchBar from './SearchBar'
 import { printSavedQuote, printBOM } from '../utils/printQuote'
+import { quotePricing } from '../utils/pricing'
 
 interface Props {
   quotes: Quote[]
@@ -146,6 +147,7 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
           const isConfirming = confirmDelete === q.id
           const items = q.quote_items ?? []
           const hasLabour = (q.labour_total ?? 0) > 0
+          const pricing = quotePricing(Number(q.grand_total) || 0, q.gross_profit_pct, q.rebate_pct)
           const hasUplift = (q.hardware_uplift_amount ?? 0) > 0
 
           return (
@@ -165,7 +167,10 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                   <div className="quote-card-meta">{items.length} item{items.length !== 1 ? 's' : ''} · {formatDate(q.created_at)}</div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
-                  <div className="quote-card-total">{fmt(q.grand_total)}</div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="quote-card-total">{fmt(pricing.totalQuote)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Factory cost {fmt(pricing.factoryCost)}</div>
+                  </div>
                   <svg style={{ width: 16, height: 16, color: 'var(--text-3)', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}
                     viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6l4 4 4-4" /></svg>
                 </div>
@@ -290,9 +295,25 @@ export default function SavedQuotes({ quotes, loading, onUpdateStatus, onDelete,
                           <span>{fmt(Number(q.carriage))}</span>
                         </div>
                       )}
-                      <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
-                        <span>Grand total</span>
-                        <span>{fmt(q.grand_total)}</span>
+                      <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700 }}>
+                        <span>Factory cost</span>
+                        <span>{fmt(pricing.factoryCost)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                        <span style={{ color: 'var(--text-2)' }}>Gross profit ({pricing.gpPct}%)</span>
+                        <span style={{ color: 'var(--success)' }}>+{fmt(pricing.grossProfit)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
+                        <span>Quote price</span>
+                        <span>{fmt(pricing.quotePrice)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                        <span style={{ color: 'var(--text-2)' }}>Rebate ({pricing.rebatePct}%)</span>
+                        <span style={{ color: 'var(--danger)' }}>−{fmt(pricing.rebateAmount)}</span>
+                      </div>
+                      <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 6, marginTop: 2, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700, color: 'var(--brand)' }}>
+                        <span>Total quote</span>
+                        <span>{fmt(pricing.totalQuote)}</span>
                       </div>
                     </div>
                   </div>

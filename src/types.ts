@@ -62,7 +62,11 @@ export interface Quote {
   customer_name: string | null
   mo_number: string | null
   notes: string | null
-  grand_total: number
+  grand_total: number   // shown as "Factory cost" (column name kept so old quotes still work)
+  gross_profit_pct?: number | null
+  quote_price?: number | null   // factory cost + gross profit
+  rebate_pct?: number | null
+  total_quote?: number | null   // quote price - rebate
   materials_subtotal: number
   hardware_uplift_pct: number
   hardware_uplift_amount: number
@@ -151,6 +155,8 @@ export interface QuoteFormData {
   labour_minutes: string
   uplift_pct: string   // blank = use the admin default
   carriage: string     // £, no uplift or labour on it; blank = none
+  gp_pct: string       // gross profit % (margin) on the factory cost; blank = 0
+  rebate_pct: string   // rebate % off the quote price; blank = 0
 }
 
 export interface AppSettings {

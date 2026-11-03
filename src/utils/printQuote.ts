@@ -1,4 +1,6 @@
 import type { Quote, QuoteExtra } from '../types'
+import { quotePricing } from './pricing'
+import type { QuotePricing } from './pricing'
 
 interface PrintItem {
   description: string
@@ -22,7 +24,7 @@ interface PrintQuoteOptions {
   labourRatePerMin: number
   labourTotal: number
   carriage?: number
-  grandTotal: number
+  pricing: QuotePricing   // factory cost, gross profit, quote price, rebate, total quote
   baseUrl: string
   extras?: QuoteExtra[]
 }
@@ -31,7 +33,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   const {
     project_name, customer_name, mo_number, notes, items,
     materialsSubtotal, hardwareUpliftPct, hardwareUpliftAmount,
-    labourMinutes, labourRatePerMin, labourTotal, grandTotal, baseUrl,
+    labourMinutes, labourRatePerMin, labourTotal, pricing, baseUrl,
   } = opts
   const extras = opts.extras ?? []
   const extrasLabour = extras.reduce((sum, e) => sum + (Number(e.labour_minutes) || 0), 0)
@@ -132,6 +134,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     tr.summary-row td.label { color: #5c6070; }
     tr.uplift-row td { background: #fffbe6; color: #5c4200; }
     tr.labour-row td { background: #eef4ff; color: #003578; }
+    tr.subtotal-row td { border-top: 1.5px solid #d0d4dc; font-size: 11pt; }
     tr.total-row td { background: #004A9A; color: #fff; font-size: 13pt; font-weight: 700; padding: 10px; }
     tr.total-row td.right { text-align: right; }
 
@@ -200,9 +203,25 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
       ${labourRow}
       ${extraCostRows}
       ${carriageRow}
+      <tr class="summary-row subtotal-row">
+        <td colspan="4" class="right bold">Factory cost</td>
+        <td class="right bold">£${pricing.factoryCost.toFixed(2)}</td>
+      </tr>
+      <tr class="summary-row">
+        <td colspan="4" class="right label">Gross profit (${pricing.gpPct}%)</td>
+        <td class="right">£${pricing.grossProfit.toFixed(2)}</td>
+      </tr>
+      <tr class="summary-row">
+        <td colspan="4" class="right bold">Quote price</td>
+        <td class="right bold">£${pricing.quotePrice.toFixed(2)}</td>
+      </tr>
+      <tr class="summary-row">
+        <td colspan="4" class="right label">Rebate (${pricing.rebatePct}%)</td>
+        <td class="right">−£${pricing.rebateAmount.toFixed(2)}</td>
+      </tr>
       <tr class="total-row">
-        <td colspan="4" class="right">Grand total</td>
-        <td class="right">£${grandTotal.toFixed(2)}</td>
+        <td colspan="4" class="right">Total quote</td>
+        <td class="right">£${pricing.totalQuote.toFixed(2)}</td>
       </tr>
     </tbody>
   </table>
@@ -229,7 +248,7 @@ export interface PrintFromBuilderOptions {
   labourRatePerMin: number
   labourTotal: number
   carriage?: number
-  grandTotal: number
+  pricing: QuotePricing   // factory cost, gross profit, quote price, rebate, total quote
   baseUrl: string
   extras?: QuoteExtra[]
 }
@@ -248,7 +267,7 @@ export function printQuote(opts: PrintFromBuilderOptions) {
     labourRatePerMin: opts.labourRatePerMin,
     labourTotal: opts.labourTotal,
     carriage: opts.carriage,
-    grandTotal: opts.grandTotal,
+    pricing: opts.pricing,
     baseUrl: opts.baseUrl,
     extras: opts.extras,
   })
@@ -279,7 +298,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
     labourRatePerMin: quote.labour_rate_per_min ?? 0,
     labourTotal: quote.labour_total ?? 0,
     carriage: Number(quote.carriage) || 0,
-    grandTotal: quote.grand_total ?? 0,
+    pricing: quotePricing(Number(quote.grand_total) || 0, quote.gross_profit_pct, quote.rebate_pct),
     baseUrl,
     extras: quote.extras ?? [],
   })
