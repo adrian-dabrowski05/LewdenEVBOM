@@ -5,7 +5,7 @@ import type {
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
   Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild,
 } from './types'
-import { computeExtras, contextFromPreset, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
+import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -19,6 +19,18 @@ import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
 import Toast from './components/Toast'
 import PartRequests from './components/PartRequests'
+
+// "Prices last reviewed" line at the top of the quote builder, set in Admin > Settings
+function PricesReviewed({ date }: { date: string }) {
+  if (!date) return null
+  const d = new Date(`${date}T00:00:00`)
+  const shown = isNaN(d.getTime()) ? date : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)', background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 99, padding: '4px 12px', marginBottom: 12 }}>
+      Prices last reviewed: <strong style={{ color: 'var(--text-1)' }}>{shown}</strong>
+    </div>
+  )
+}
 
 export interface ToastState { message: string; type: 'success' | 'error' }
 
@@ -42,7 +54,7 @@ export default function App() {
   const [extras, setExtras] = useState<Extra[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
-  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0 })
+  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0, prices_reviewed_at: '' })
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
   const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
@@ -205,6 +217,7 @@ export default function App() {
       setSettings({
         hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5'),
         labour_rate_per_min: parseFloat(map['labour_rate_per_min'] ?? '0'),
+        prices_reviewed_at: (map['prices_reviewed_at'] ?? '').trim(),
       })
     }
   }
@@ -220,6 +233,14 @@ export default function App() {
         setVariantSelections((vs) => { const v = { ...vs }; delete v[productId]; return v })
       } else {
         newQtys[productId] = qty
+        // Picking a cabinet / steelwork part fills in the pillar's rating, material
+        // and size from what the part says. Only when it is first added, so a
+        // rep's own change to those boxes isn't undone by the + button.
+        if (prevQty <= 0) {
+          const product = products.find((p) => p.id === productId)
+          const found = product ? contextFromSteelwork(product) : {}
+          if (Object.keys(found).length > 0) setBuildContext((ctx) => mergeContext(ctx, found))
+        }
       }
       const productPrereqs = prereqs.filter((p) => p.product_id === productId)
       if (productPrereqs.length === 0) return newQtys
@@ -252,7 +273,7 @@ export default function App() {
       })
       return newQtys
     })
-  }, [prerequisites])
+  }, [prerequisites, products])
 
   // ── Apply preset (with optional configuration) ─────────────
   const applyPreset = useCallback((preset: Preset, configurationId?: string) => {
@@ -272,13 +293,20 @@ export default function App() {
       }
     }
 
-    setBuildContext(contextFromPreset(preset, configurationId))
+    // The preset name gives the rating, size and material; anything it doesn't
+    // give (e.g. a size 4 pillar) is read from the steelwork parts in the preset
+    const config = configurationId ? preset.preset_configurations?.find((c) => c.id === configurationId) : null
+    const presetIds = new Set([...(preset.preset_items ?? []), ...(config?.preset_configuration_items ?? [])].map((i) => i.product_id))
+    const fromSteel = products
+      .filter((p) => presetIds.has(p.id))
+      .reduce<BuildContext>((ctx, p) => mergeContext(ctx, contextFromSteelwork(p)), EMPTY_CONTEXT)
+    setBuildContext(mergeContext(fromSteel, contextFromPreset(preset, configurationId)))
 
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
-  }, [prerequisites, setQty, showToast])
+  }, [prerequisites, products, setQty, showToast])
 
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
@@ -489,7 +517,15 @@ export default function App() {
 
   const setVariantSelection = useCallback((productId: string, variantId: string) => {
     setVariantSelections((prev) => ({ ...prev, [productId]: variantId }))
-  }, [])
+    // A steelwork variant that names a size / material / rating (e.g. "Stainless")
+    // fills in that box too
+    const product = products.find((p) => p.id === productId)
+    const variant = variants.find((v) => v.id === variantId)
+    if (product?.category === 'Steelworks' && variant) {
+      const found = contextFromText(`${variant.label} ${variant.part_number_suffix ?? ''}`)
+      if (Object.keys(found).length > 0) setBuildContext((ctx) => mergeContext(ctx, found))
+    }
+  }, [products, variants])
 
   const activeCount = Object.values(extrasResult.effectiveQty).filter((q) => q > 0).length
 
@@ -497,6 +533,7 @@ export default function App() {
     <>
       <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} />
       <main className="main">
+        {view === 'builder' && <PricesReviewed date={settings.prices_reviewed_at} />}
         {view === 'builder' && (() => {
           const builderProps = {
             products,

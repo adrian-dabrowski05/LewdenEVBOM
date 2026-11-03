@@ -773,6 +773,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
 function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings; onRefresh: () => void; showToast: Props['showToast'] }) {
   const [upliftPct, setUpliftPct] = useState(String(settings.hardware_uplift_pct))
   const [labourRate, setLabourRate] = useState(String(settings.labour_rate_per_min))
+  const [reviewedAt, setReviewedAt] = useState(settings.prices_reviewed_at)
   const [saving, setSaving] = useState(false)
 
   const saveSetting = async (key: string, value: string, min: number, max: number | null, label: string) => {
@@ -786,10 +787,36 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
   }
 
   const saveUplift = async () => { if (await saveSetting('hardware_uplift_pct', upliftPct, 0, 100, 'percentage between 0 and 100')) { showToast('Hardware uplift saved'); onRefresh() } }
+  // Date prices were last reviewed: shown to everyone at the top of the quote builder.
+  // Adds the settings row if it isn't there yet (supabase/prices-reviewed.sql adds it too).
+  const saveReviewedAt = async (value: string) => {
+    setSaving(true)
+    let { data, error } = await supabase.from('settings').update({ value }).eq('key', 'prices_reviewed_at').select()
+    if (!error && (data ?? []).length === 0) ({ error } = await supabase.from('settings').insert({ key: 'prices_reviewed_at', value }))
+    setSaving(false)
+    if (error) { showToast(`Failed to save date: ${error.message}`, 'error'); return }
+    setReviewedAt(value)
+    showToast(value ? 'Prices reviewed date saved' : 'Prices reviewed date cleared')
+    onRefresh()
+  }
+  const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
   const saveLabour = async () => { if (await saveSetting('labour_rate_per_min', labourRate, 0, null, 'labour rate')) { showToast('Labour rate saved'); onRefresh() } }
 
   return (
     <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card" style={{ padding: '20px 24px' }}>
+        <h3 style={{ marginBottom: 4 }}>Prices last reviewed</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>Shown to everyone at the top of the quote builder. Leave blank and save to hide it.</p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 180px' }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</label>
+            <input className="input" type="date" value={reviewedAt} onChange={(e) => setReviewedAt(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600 }} />
+          </div>
+          <button className="btn btn-ghost" onClick={() => saveReviewedAt(today())} disabled={saving} style={{ flexShrink: 0 }}>Today</button>
+          <button className="btn btn-primary" onClick={() => saveReviewedAt(reviewedAt)} disabled={saving} style={{ flexShrink: 0 }}>Save</button>
+        </div>
+      </div>
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Hardware uplift</h3>
         <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>A percentage added to the materials subtotal on every quote. Shown as a separate line item on quotes and PDFs.</p>

@@ -513,7 +513,7 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost,
     <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)' }}>Extras</div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset — change if needed</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset or steelwork — change if needed</div>
       </div>
 
       <div style={{ marginBottom: 12 }}><BuildContextFields ctx={ctx} setCtx={setCtx} /></div>

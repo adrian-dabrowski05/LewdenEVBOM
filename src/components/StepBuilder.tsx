@@ -582,7 +582,7 @@ export default function StepBuilder({
           <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
             <div style={sectionTitleStyle}>Pillar</div>
             <BuildContextFields ctx={buildContext} setCtx={setBuildContext} />
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8 }}>Filled in from the preset. Used to decide which extras can be ticked.</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8 }}>Filled in from the preset or the steelwork you pick. Change them if needed; they decide which extras can be ticked.</div>
           </div>
         </>
       )}

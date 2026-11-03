@@ -156,6 +156,7 @@ export interface QuoteFormData {
 export interface AppSettings {
   hardware_uplift_pct: number
   labour_rate_per_min: number
+  prices_reviewed_at: string   // date the admin last reviewed prices (YYYY-MM-DD), blank = not set
 }
 
 // ── Extras ─────────────────────────────────────────────────────
