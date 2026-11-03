@@ -148,7 +148,7 @@ function groupBy(items: Product[], rules: [string, RegExp][], otherLabel: string
 const sectionTitleStyle = { fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 } as const
 
 export default function StepBuilder({
-  products, loading, variants, autoAdded,
+  products, loading, variants, prerequisites, autoAdded,
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
@@ -163,6 +163,12 @@ export default function StepBuilder({
 
   const productsById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])) as Record<string, Product>, [products])
   const variantsById = useMemo(() => Object.fromEntries(variants.map((v) => [v.id, v])) as Record<string, ProductVariant>, [variants])
+  const prereqsByProduct = useMemo(() => {
+    const map: Record<string, ProductPrerequisite[]> = {}
+    prerequisites.forEach((pr) => { (map[pr.product_id] ??= []).push(pr) })
+    return map
+  }, [prerequisites])
+
   const variantsByProduct = useMemo(() => {
     const map: Record<string, ProductVariant[]> = {}
     variants.forEach((v) => { (map[v.product_id] ??= []).push(v) })
@@ -323,6 +329,16 @@ export default function StepBuilder({
               <span style={{ fontSize: 13 }}>{p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}<span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 3 }}>each</span></span>
             </div>
             {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{p.notes}</div>}
+            {qty > 0 && (prereqsByProduct[p.id]?.length ?? 0) > 0 && (
+              <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--success)', fontWeight: 500, maxWidth: 420 }}>
+                <span style={{ marginRight: 4 }}>✓</span>Auto-included:&nbsp;
+                {prereqsByProduct[p.id].map((pr, i) => {
+                  const prereqProduct = productsById[pr.prerequisite_product_id]
+                  const label = pr.note || `${prereqProduct?.description ?? 'Unknown'} ×${pr.quantity}`
+                  return <span key={pr.id}>{i > 0 ? ', ' : ''}<strong>{label}</strong></span>
+                })}
+              </div>
+            )}
             {autoParents.length > 0 && qty > 0 && (
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--success)', marginTop: 4 }}>✓ Auto-added via {autoParents.slice(0, 2).join(', ')}{autoParents.length > 2 ? ` +${autoParents.length - 2} more` : ''}</div>
             )}
