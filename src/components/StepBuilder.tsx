@@ -112,10 +112,14 @@ const EXTRA_PLACES: Record<number, string> = {
   12: 'accessories',          // Future proofing
 }
 
-// Extras not listed above go by their name: surge extras sit in Incomer
-// (after the others, as they are added later), anything else in Accessories
+// Extras not listed above go by their name: surge extras sit in Incomer (after the
+// others there), busbar extras at the bottom of Distribution, anything else in Accessories
 function placeOfExtra(e: Extra): string {
-  return EXTRA_PLACES[e.number] ?? (/surge/i.test(`${e.name} ${e.description ?? ''}`) ? 'incomer' : 'accessories')
+  if (EXTRA_PLACES[e.number]) return EXTRA_PLACES[e.number]
+  const text = `${e.name} ${e.description ?? ''}`
+  if (/surge/i.test(text)) return 'incomer'
+  if (/bus ?-?bar|copper/i.test(text)) return 'distribution'   // shown under the Distribution parts
+  return 'accessories'
 }
 
 const SECTION_CATEGORIES: Partial<Record<SectionKey, string[]>> = {
