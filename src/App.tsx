@@ -20,6 +20,18 @@ import AdminLogin from './components/AdminLogin'
 import Toast from './components/Toast'
 import PartRequests from './components/PartRequests'
 
+// "Prices last reviewed" line at the top of the quote builder, set in Admin > Settings
+function PricesReviewed({ date }: { date: string }) {
+  if (!date) return null
+  const d = new Date(`${date}T00:00:00`)
+  const shown = isNaN(d.getTime()) ? date : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)', background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 99, padding: '4px 12px', marginBottom: 12 }}>
+      Prices last reviewed: <strong style={{ color: 'var(--text-1)' }}>{shown}</strong>
+    </div>
+  )
+}
+
 export interface ToastState { message: string; type: 'success' | 'error' }
 
 const DEFAULT_FORM: QuoteFormData = {
@@ -42,7 +54,7 @@ export default function App() {
   const [extras, setExtras] = useState<Extra[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
-  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0 })
+  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0, prices_reviewed_at: '' })
 
   const [quantities, setQuantities] = useState<QuantityMap>({})
   const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
@@ -205,6 +217,7 @@ export default function App() {
       setSettings({
         hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5'),
         labour_rate_per_min: parseFloat(map['labour_rate_per_min'] ?? '0'),
+        prices_reviewed_at: (map['prices_reviewed_at'] ?? '').trim(),
       })
     }
   }
@@ -520,6 +533,7 @@ export default function App() {
     <>
       <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} />
       <main className="main">
+        {view === 'builder' && <PricesReviewed date={settings.prices_reviewed_at} />}
         {view === 'builder' && (() => {
           const builderProps = {
             products,
