@@ -1,9 +1,10 @@
 import { useState, useMemo, Fragment } from 'react'
-import type { Product, ProductVariant, ProductPrerequisite, Preset, PresetItem, PresetConfiguration, Category, AppSettings, Extra } from '../types'
+import type { Product, ProductVariant, ProductPrerequisite, ProductIncompatibility, Preset, PresetItem, PresetConfiguration, Category, AppSettings, Extra } from '../types'
 import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
 import ExtrasAdmin from './ExtrasAdmin'
+import { pairKey } from '../utils/compatibility'
 
 interface Props {
   products: Product[]
@@ -16,13 +17,15 @@ interface Props {
   onRefreshSettings: () => void
   onRefreshVariants: () => void
   onRefreshPrerequisites: () => void
+  incompatibilities: ProductIncompatibility[]
+  onRefreshIncompatibilities: () => void
   extras: Extra[]
   onRefreshExtras: () => void
   showToast: (msg: string, type?: 'success' | 'error') => void
 }
 
 type AdminTab = 'products' | 'presets' | 'extras' | 'settings'
-type ProductPanel = 'variants' | 'prerequisites' | null
+type ProductPanel = 'variants' | 'prerequisites' | 'compat' | null
 
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
 const emptyBuffer = (): EditBuffer => ({ description: '', category: 'Outgoing', part_number: '', factory_cost: '', notes: '' })
@@ -263,6 +266,122 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
   )
 }
 
+// ── Compatibility manager ─────────────────────────────────────
+// Ticks the parts that can't go on a quote with this one. Works both ways:
+// a rule set here also shows on the other part.
+function CompatibilityManager({ product, products, incompatibilities, onRefresh, showToast }: {
+  product: Product; products: Product[]; incompatibilities: ProductIncompatibility[]; onRefresh: () => void; showToast: Props['showToast']
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // The other part of every pair this product is in
+  const rowsByOther = useMemo(() => {
+    const map: Record<string, ProductIncompatibility[]> = {}
+    incompatibilities.forEach((r) => {
+      const other = r.product_id === product.id ? r.incompatible_product_id : r.incompatible_product_id === product.id ? r.product_id : null
+      if (other && other !== product.id) (map[other] ??= []).push(r)
+    })
+    return map
+  }, [incompatibilities, product.id])
+
+  const others = products.filter((p) => p.id !== product.id)
+  const ticked = others.filter((p) => rowsByOther[p.id])
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return others
+    return others.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || (p.notes ?? '').toLowerCase().includes(q))
+  }, [others, search])
+
+  const tableMissing = (msg: string) => /product_incompatibilities/.test(msg) && /exist|schema cache|find/i.test(msg)
+  const fail = (msg: string) => showToast(tableMissing(msg) ? 'Run supabase/incompatibilities.sql in Supabase first' : `Could not save: ${msg}`, 'error')
+
+  const add = async (ids: string[]) => {
+    const todo = ids.filter((id) => id !== product.id && !rowsByOther[id])
+    if (todo.length === 0) return
+    setSaving(true)
+    const { error } = await supabase.from('product_incompatibilities')
+      .upsert(todo.map((id) => pairKey(product.id, id)), { onConflict: 'product_id,incompatible_product_id', ignoreDuplicates: true })
+    setSaving(false)
+    if (error) { fail(error.message); return }
+    onRefresh()
+  }
+
+  const remove = async (ids: string[]) => {
+    const rowIds = ids.flatMap((id) => (rowsByOther[id] ?? []).map((r) => r.id))
+    if (rowIds.length === 0) return
+    setSaving(true)
+    const { error } = await supabase.from('product_incompatibilities').delete().in('id', rowIds)
+    setSaving(false)
+    if (error) { fail(error.message); return }
+    onRefresh()
+  }
+
+  const toggle = (id: string) => (rowsByOther[id] ? remove([id]) : add([id]))
+  const shownIds = shown.map((p) => p.id)
+  const allShownTicked = shown.length > 0 && shown.every((p) => rowsByOther[p.id])
+
+  const label = (p: Product) => `${p.description}${p.part_number ? ` (${p.part_number})` : ''}`
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--danger)', marginBottom: 8 }}>
+        Incompatible items
+        {ticked.length > 0 && <span style={{ background: 'var(--danger)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 10, marginLeft: 6 }}>{ticked.length}</span>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 10, opacity: 0.85 }}>
+        When this part is on a quote, the ticked parts are greyed out (and the other way round).
+      </p>
+
+      {ticked.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {ticked.map((p) => (
+            <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--surface)', border: '1px solid var(--danger)', borderRadius: 99, padding: '3px 4px 3px 10px', fontSize: 12 }}>
+              {label(p)}
+              <button type="button" onClick={() => remove([p.id])} disabled={saving} aria-label={`Remove ${p.description}`} title="Remove"
+                style={{ width: 20, height: 20, borderRadius: 99, border: 'none', background: 'var(--danger)', color: '#fff', fontSize: 12, lineHeight: 1, cursor: 'pointer', padding: 0 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <button type="button" className="btn btn-sm" onClick={() => setOpen(!open)} style={{ borderColor: 'var(--danger)', color: 'var(--danger)', background: 'var(--surface)' }}>
+        {open ? 'Close list ▴' : 'Select incompatible items ▾'}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8, background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-md)', padding: 10 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+            <input className="input input-sm" style={{ flex: '1 1 200px' }} placeholder="Search, e.g. size 2" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+            <button type="button" className="btn btn-sm" disabled={saving || shown.length === 0} onClick={() => (allShownTicked ? remove(shownIds) : add(shownIds))}>
+              {allShownTicked ? `Untick all ${shown.length} shown` : `Tick all ${shown.length} shown`}
+            </button>
+          </div>
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            {CATEGORIES.map((cat) => {
+              const cp = shown.filter((p) => p.category === cat)
+              if (!cp.length) return null
+              return (
+                <div key={cat} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', padding: '4px 0' }}>{cat}</div>
+                  {cp.map((p) => (
+                    <label key={p.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '4px 2px', fontSize: 13, cursor: saving ? 'wait' : 'pointer' }}>
+                      <input type="checkbox" checked={!!rowsByOther[p.id]} disabled={saving} onChange={() => toggle(p.id)} style={{ marginTop: 2, width: 15, height: 15, accentColor: 'var(--danger)', flexShrink: 0 }} />
+                      <span>{p.description}{p.part_number && <span className="part-number" style={{ marginLeft: 6 }}>{p.part_number}</span>}</span>
+                    </label>
+                  ))}
+                </div>
+              )
+            })}
+            {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-3)', padding: 6 }}>No parts match.</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Configuration manager ─────────────────────────────────────
 function ConfigurationManager({ preset, products, onRefresh, showToast }: {
   preset: Preset; products: Product[]; onRefresh: () => void; showToast: Props['showToast']
@@ -400,9 +519,9 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
 }
 
 // ── Products tab ──────────────────────────────────────────────
-function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, showToast }: {
-  products: Product[]; variants: ProductVariant[]; prerequisites: ProductPrerequisite[]
-  onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void
+function ProductsTab({ products, variants, prerequisites, incompatibilities, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, onRefreshIncompatibilities, showToast }: {
+  products: Product[]; variants: ProductVariant[]; prerequisites: ProductPrerequisite[]; incompatibilities: ProductIncompatibility[]
+  onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void; onRefreshIncompatibilities: () => void
   showToast: Props['showToast']
 }) {
   const [search, setSearch] = useState('')
@@ -431,6 +550,18 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
     prerequisites.forEach((p) => { map[p.product_id] = (map[p.product_id] ?? 0) + 1 })
     return map
   }, [prerequisites])
+
+  // Counted both ways, same as the builders
+  const incompatCountByProduct = useMemo(() => {
+    const ids = new Set(products.map((p) => p.id))
+    const map: Record<string, number> = {}
+    incompatibilities.forEach((r) => {
+      if (r.product_id === r.incompatible_product_id || !ids.has(r.product_id) || !ids.has(r.incompatible_product_id)) return
+      map[r.product_id] = (map[r.product_id] ?? 0) + 1
+      map[r.incompatible_product_id] = (map[r.incompatible_product_id] ?? 0) + 1
+    })
+    return map
+  }, [incompatibilities, products])
 
   const allFilteredReviewed = filtered.length > 0 && filtered.every((p) => reviewed.has(p.id))
   const reviewedCount = filtered.filter((p) => reviewed.has(p.id)).length
@@ -517,7 +648,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
               <th style={{ width: 110 }}>Part no.</th>
               <th style={{ width: 100, textAlign: 'right' }}>Factory cost</th>
               <th style={{ width: 160 }}>Notes</th>
-              <th style={{ width: 200, textAlign: 'right' }}>Actions</th>
+              <th style={{ width: 240, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -538,6 +669,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
             {filtered.map((p) => {
               const variantCount = variantCountByProduct[p.id] ?? 0
               const prereqCount = prereqCountByProduct[p.id] ?? 0
+              const incompatCount = incompatCountByProduct[p.id] ?? 0
               const isEditingThis = editingId === p.id
               const currentPanel = openPanel?.id === p.id ? openPanel.panel : null
               const isReviewed = reviewed.has(p.id)
@@ -569,6 +701,7 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                       <td>
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                           <button className="btn btn-sm" style={prereqCount > 0 ? { borderColor: 'var(--success)', color: 'var(--success)' } : {}} onClick={() => togglePanel(p.id, 'prerequisites')}>Prereqs{prereqCount > 0 ? ` (${prereqCount})` : ''}</button>
+                          <button className="btn btn-sm" style={incompatCount > 0 ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : {}} onClick={() => togglePanel(p.id, 'compat')}>Incompatible{incompatCount > 0 ? ` (${incompatCount})` : ''}</button>
                           <button className="btn btn-sm" style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}} onClick={() => togglePanel(p.id, 'variants')}>Variants{variantCount > 0 ? ` (${variantCount})` : ''}</button>
                           <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
                           <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
@@ -584,6 +717,11 @@ function ProductsTab({ products, variants, prerequisites, onRefreshProducts, onR
                   {currentPanel === 'prerequisites' && !isEditingThis && (
                     <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
                       <PrerequisiteManager product={p} products={products} prerequisites={prerequisites} onRefresh={onRefreshPrerequisites} showToast={showToast} />
+                    </td></tr>
+                  )}
+                  {currentPanel === 'compat' && !isEditingThis && (
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <CompatibilityManager product={p} products={products} incompatibilities={incompatibilities} onRefresh={onRefreshIncompatibilities} showToast={showToast} />
                     </td></tr>
                   )}
                 </Fragment>
@@ -860,7 +998,7 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
 }
 
 // ── Main ──────────────────────────────────────────────────────
-export default function AdminPanel({ products, presets, settings, variants, prerequisites, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, onRefreshPrerequisites, extras, onRefreshExtras, showToast }: Props) {
+export default function AdminPanel({ products, presets, settings, variants, prerequisites, onRefreshProducts, onRefreshPresets, onRefreshSettings, onRefreshVariants, onRefreshPrerequisites, incompatibilities, onRefreshIncompatibilities, extras, onRefreshExtras, showToast }: Props) {
   const [tab, setTab] = useState<AdminTab>('products')
 
   return (
@@ -878,7 +1016,7 @@ export default function AdminPanel({ products, presets, settings, variants, prer
         <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
 
-      {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} showToast={showToast} />}
+      {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} incompatibilities={incompatibilities} onRefreshIncompatibilities={onRefreshIncompatibilities} showToast={showToast} />}
       {tab === 'presets' && <PresetsTab products={products} presets={presets} onRefresh={onRefreshPresets} showToast={showToast} />}
       {tab === 'extras' && <ExtrasAdmin extras={extras} products={products} onRefresh={onRefreshExtras} showToast={showToast} />}
       {tab === 'settings' && <SettingsTab settings={settings} onRefresh={onRefreshSettings} showToast={showToast} />}

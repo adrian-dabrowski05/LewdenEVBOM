@@ -10,7 +10,9 @@ import type { ExtrasResult } from '../utils/extras'
 import { toQuoteExtras } from '../utils/extras'
 import { quotePricing } from '../utils/pricing'
 import type { EditingQuote } from '../App'
-import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows } from './QuoteBuilder'
+import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
+import type { IncompatMap } from '../utils/compatibility'
+import { clashesFor } from '../utils/compatibility'
 
 // Step-by-step quote builder. Uses the same BOM, extras and quote details as the
 // full Quote builder, so a rep can switch between the two at any time.
@@ -20,6 +22,7 @@ interface Props {
   loading: boolean
   variants: ProductVariant[]
   prerequisites: ProductPrerequisite[]
+  incompatMap: IncompatMap
   autoAdded: AutoAddedMap
   quantities: QuantityMap
   setQty: (id: string, qty: number) => void
@@ -167,7 +170,7 @@ function groupBy(items: Product[], rules: [string, RegExp][], otherLabel: string
 const sectionTitleStyle = { fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 } as const
 
 export default function StepBuilder({
-  products, loading, variants, prerequisites, autoAdded,
+  products, loading, variants, prerequisites, incompatMap, autoAdded,
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
@@ -348,8 +351,10 @@ export default function StepBuilder({
     const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
     const autoParents = Object.keys(autoAdded[p.id] ?? {}).map((id) => productsById[id]?.description ?? 'another part')
     const diff = extrasResult.delta[p.id]
+    const clashIds = clashesFor(p.id, incompatMap, finalQty)
+    const blocked = clashIds.length > 0 && onQuote <= 0
     return (
-      <div key={p.id} style={{ padding: '10px 12px', border: `1.5px solid ${qty > 0 ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: qty > 0 ? 'var(--brand-light)' : 'var(--surface)' }}>
+      <div key={p.id} style={{ padding: '10px 12px', border: `1.5px solid ${clashIds.length > 0 && onQuote > 0 ? 'var(--danger)' : qty > 0 ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', background: blocked ? 'var(--surface-3)' : qty > 0 ? 'var(--brand-light)' : 'var(--surface)', opacity: blocked ? 0.7 : 1 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         {reorderMode && (
           <MoveButtons index={idx} count={group.length} disabled={reordering} onMove={(dir) => onMoveProduct(p.id, group.map((g) => g.id), dir)} />
@@ -362,6 +367,7 @@ export default function StepBuilder({
               <span style={{ fontSize: 13 }}>{p.factory_cost != null ? fmt(p.factory_cost) : <span className="cost-tbc">TBC</span>}<span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 3 }}>each</span></span>
             </div>
             {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{p.notes}</div>}
+            <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
             {qty > 0 && (prereqsByProduct[p.id]?.length ?? 0) > 0 && (
               <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--success)', fontWeight: 500, maxWidth: 420 }}>
                 <span style={{ marginRight: 4 }}>✓</span>Auto-included:&nbsp;
@@ -380,7 +386,7 @@ export default function StepBuilder({
             ) : null}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-            <Stepper value={qty} onChange={(n) => setQty(p.id, n)} />
+            <Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} />
             <div style={{ minWidth: 72, textAlign: 'right', fontWeight: 600, fontSize: 14 }}>
               {lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>—</span>}
             </div>
@@ -596,6 +602,8 @@ export default function StepBuilder({
       </div>
 
       {reorderMode && section !== 'review' && <ReorderBanner />}
+
+      <IncompatBanner incompatMap={incompatMap} qty={finalQty} productsById={productsById} />
 
       {section === 'steelwork' && currentSteel.key === 'material' && (
         <>
