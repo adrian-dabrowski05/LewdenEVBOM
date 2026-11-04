@@ -222,7 +222,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
             return (
               <div key={pr.id} style={{ background: 'var(--surface)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 160 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{prereqProduct?.description ?? 'Unknown'}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{prereqProduct?.description ?? <span style={{ color: 'var(--danger)' }}>Removed product (no longer in the catalogue)</span>}</div>
                   {prereqProduct?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{prereqProduct.part_number}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
@@ -424,7 +424,11 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
     onRefresh()
   }
 
-  const removeConfigItem = async (itemId: string) => { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh() }
+  const removeConfigItem = async (itemId: string) => {
+    const { error } = await supabase.from('preset_configuration_items').delete().eq('id', itemId)
+    if (error) showToast('Failed to remove item', 'error')
+    onRefresh()
+  }
 
   const updateConfigItemQty = async (itemId: string, qty: number) => {
     if (qty <= 0) { await supabase.from('preset_configuration_items').delete().eq('id', itemId); onRefresh(); return }
@@ -470,7 +474,7 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
                   return (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ flex: 1, fontSize: 13 }}>
-                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown'}</div>
+                        <div style={{ fontWeight: 500 }}>{product?.description ?? <span style={{ color: 'var(--danger)' }}>Removed product (no longer in the catalogue)</span>}</div>
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <input type="number" min="0.01" step="0.5"
@@ -519,9 +523,9 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
 }
 
 // ── Products tab ──────────────────────────────────────────────
-function ProductsTab({ products, variants, prerequisites, incompatibilities, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, onRefreshIncompatibilities, showToast }: {
+function ProductsTab({ products, variants, prerequisites, incompatibilities, onRefreshProducts, onRefreshVariants, onRefreshPrerequisites, onRefreshIncompatibilities, onRefreshPresets, showToast }: {
   products: Product[]; variants: ProductVariant[]; prerequisites: ProductPrerequisite[]; incompatibilities: ProductIncompatibility[]
-  onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void; onRefreshIncompatibilities: () => void
+  onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void; onRefreshIncompatibilities: () => void; onRefreshPresets: () => void
   showToast: Props['showToast']
 }) {
   const [search, setSearch] = useState('')
@@ -582,10 +586,21 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
   }
 
   const deleteProduct = async (id: string) => {
-    if (!confirm('Remove this product from the catalogue?')) return
+    if (!confirm('Remove this product from the catalogue?\n\nIt will also be taken out of every preset, prerequisite and incompatibility rule. Saved quotes keep it.')) return
     const { error } = await supabase.from('products').update({ is_active: false }).eq('id', id)
     if (error) { showToast('Failed to remove product', 'error'); return }
-    showToast('Product removed'); onRefreshProducts()
+    // The product row is kept (old quotes point at it), so tidy up everything
+    // that would otherwise keep offering it as an "Unknown product"
+    const results = await Promise.all([
+      supabase.from('preset_items').delete().eq('product_id', id),
+      supabase.from('preset_configuration_items').delete().eq('product_id', id),
+      supabase.from('product_prerequisites').delete().or(`product_id.eq.${id},prerequisite_product_id.eq.${id}`),
+      supabase.from('product_incompatibilities').delete().or(`product_id.eq.${id},incompatible_product_id.eq.${id}`),
+    ])
+    const failed = results.filter((r) => r.error)
+    if (failed.length > 0) showToast('Product removed, but some presets or rules still list it. Remove those in Admin.', 'error')
+    else showToast('Product removed')
+    onRefreshProducts(); onRefreshPresets(); onRefreshPrerequisites(); onRefreshIncompatibilities()
   }
 
   const saveNew = async () => {
@@ -782,7 +797,11 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
     showToast('Item added'); setAddItemProductId(''); setAddItemQty('1'); onRefresh()
   }
 
-  const removeItem = async (itemId: string) => { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh() }
+  const removeItem = async (itemId: string) => {
+    const { error } = await supabase.from('preset_items').delete().eq('id', itemId)
+    if (error) showToast('Failed to remove item', 'error')
+    onRefresh()
+  }
 
   const updateItemQty = async (itemId: string, qty: number) => {
     if (qty <= 0) { await supabase.from('preset_items').delete().eq('id', itemId); onRefresh(); return }
@@ -871,7 +890,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                   return (
                     <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <div style={{ flex: 1, fontSize: 13 }}>
-                        <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown product'}</div>
+                        <div style={{ fontWeight: 500 }}>{product?.description ?? <span style={{ color: 'var(--danger)' }}>Removed product (no longer in the catalogue)</span>}</div>
                         {product?.part_number && <span className="part-number" style={{ marginTop: 2, display: 'inline-block' }}>{product.part_number}</span>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -1016,7 +1035,7 @@ export default function AdminPanel({ products, presets, settings, variants, prer
         <button className={`admin-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
 
-      {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} incompatibilities={incompatibilities} onRefreshIncompatibilities={onRefreshIncompatibilities} showToast={showToast} />}
+      {tab === 'products' && <ProductsTab products={products} variants={variants} prerequisites={prerequisites} onRefreshProducts={onRefreshProducts} onRefreshVariants={onRefreshVariants} onRefreshPrerequisites={onRefreshPrerequisites} incompatibilities={incompatibilities} onRefreshIncompatibilities={onRefreshIncompatibilities} onRefreshPresets={onRefreshPresets} showToast={showToast} />}
       {tab === 'presets' && <PresetsTab products={products} presets={presets} onRefresh={onRefreshPresets} showToast={showToast} />}
       {tab === 'extras' && <ExtrasAdmin extras={extras} products={products} onRefresh={onRefreshExtras} showToast={showToast} />}
       {tab === 'settings' && <SettingsTab settings={settings} onRefresh={onRefreshSettings} showToast={showToast} />}

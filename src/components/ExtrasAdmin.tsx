@@ -65,7 +65,7 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
   const removeProducts = Array.from(new Set(items.filter((i) => i.action === 'remove').map((i) => i.product_id)))
   const whenOf = (i: ExtraItem) => i.if_removed_product_id ?? (i.only_if_removed ? '*' : '')
   const whenFields = (value: string) => ({ only_if_removed: value === '*', if_removed_product_id: value && value !== '*' ? value : null })
-  const productLabel = (id: string) => { const p = products.find((x) => x.id === id); return p ? (p.part_number || p.description) : 'Unknown' }
+  const productLabel = (id: string) => { const p = products.find((x) => x.id === id); return p ? (p.part_number || p.description) : 'Removed product' }
   const WhenSelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <select className="input input-sm" style={{ width: 'auto' }} title="When this part is added" value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Always</option>
@@ -118,7 +118,7 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
               {isRemove ? 'Remove' : 'Add'}
             </span>
             <div style={{ flex: '1 1 180px', fontSize: 13, minWidth: 0 }}>
-              <div style={{ fontWeight: 500 }}>{product?.description ?? 'Unknown product'}</div>
+              <div style={{ fontWeight: 500 }}>{product?.description ?? <span style={{ color: 'var(--danger)' }}>Removed product (skipped in quotes, remove this line)</span>}</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
                 {product?.part_number && <span className="part-number">{product.part_number}</span>}
                 <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{product?.factory_cost != null ? `£${product.factory_cost.toFixed(2)} each` : 'Price TBC'}</span>
