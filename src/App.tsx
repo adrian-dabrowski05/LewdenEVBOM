@@ -69,6 +69,29 @@ export default function App() {
   const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
   const [editingQuote, setEditingQuote] = useState<EditingQuote | null>(null)
 
+  // Only parts still in the catalogue. A removed part can still be listed in a
+  // preset, a prerequisite or an extra (removing a part only hides it, so old
+  // quotes keep it). The builders use these lists so a removed part never shows
+  // up as "Unknown product" or sneaks into a quote. Admin still sees everything
+  // so leftovers can be tidied up there.
+  const productIds = useMemo(() => new Set(products.map((p) => p.id)), [products])
+  const livePresets = useMemo<Preset[]>(() => presets.map((preset) => ({
+    ...preset,
+    preset_items: (preset.preset_items ?? []).filter((i) => productIds.has(i.product_id)),
+    preset_configurations: (preset.preset_configurations ?? []).map((c) => ({
+      ...c,
+      preset_configuration_items: (c.preset_configuration_items ?? []).filter((i) => productIds.has(i.product_id)),
+    })),
+  })), [presets, productIds])
+  const livePrerequisites = useMemo(
+    () => prerequisites.filter((p) => productIds.has(p.product_id) && productIds.has(p.prerequisite_product_id)),
+    [prerequisites, productIds],
+  )
+  const liveExtras = useMemo<Extra[]>(() => extras.map((e) => ({
+    ...e,
+    extra_items: (e.extra_items ?? []).filter((i) => productIds.has(i.product_id)),
+  })), [extras, productIds])
+
   // Step-by-step page instead of the full builder (remembered on this device)
   const [stepMode, setStepMode] = useState<boolean>(() => {
     try { return localStorage.getItem('builder_mode') === 'steps' } catch { return false }
@@ -215,8 +238,8 @@ export default function App() {
 
   // Final BOM = rep's quantities with the ticked extras applied on top
   const extrasResult = useMemo(
-    () => computeExtras(extras, selectedExtras, buildContext, quantities, extraCounts, extraCosts),
-    [extras, selectedExtras, buildContext, quantities, extraCounts, extraCosts],
+    () => computeExtras(liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts),
+    [liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts],
   )
 
   useEffect(() => { loadSettings() }, [])
@@ -235,7 +258,7 @@ export default function App() {
 
   // ── Smart qty setter with prereq auto-add/remove ───────────
   const setQty = useCallback((productId: string, qty: number, prereqsRef?: ProductPrerequisite[]) => {
-    const prereqs = prereqsRef ?? prerequisites
+    const prereqs = prereqsRef ?? livePrerequisites
     setQuantities((prevQtys) => {
       const prevQty = prevQtys[productId] ?? 0
       const newQtys = { ...prevQtys }
@@ -284,14 +307,14 @@ export default function App() {
       })
       return newQtys
     })
-  }, [prerequisites, products])
+  }, [livePrerequisites, products])
 
   // ── Apply preset (with optional configuration) ─────────────
   const applyPreset = useCallback((preset: Preset, configurationId?: string) => {
     // Apply common items
     const commonItems = preset.preset_items ?? []
     commonItems.forEach((item) => {
-      setQty(item.product_id, item.quantity, prerequisites)
+      setQty(item.product_id, item.quantity, livePrerequisites)
     })
 
     // Apply configuration-specific items if a config was selected
@@ -299,7 +322,7 @@ export default function App() {
       const config = preset.preset_configurations?.find((c) => c.id === configurationId)
       if (config?.preset_configuration_items) {
         config.preset_configuration_items.forEach((item) => {
-          setQty(item.product_id, item.quantity, prerequisites)
+          setQty(item.product_id, item.quantity, livePrerequisites)
         })
       }
     }
@@ -317,7 +340,7 @@ export default function App() {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
-  }, [prerequisites, products, setQty, showToast])
+  }, [livePrerequisites, products, setQty, showToast])
 
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
@@ -547,7 +570,7 @@ export default function App() {
     }
   }, [products, variants])
 
-  const activeCount = Object.values(extrasResult.effectiveQty).filter((q) => q > 0).length
+  const activeCount = Object.entries(extrasResult.effectiveQty).filter(([id, q]) => q > 0 && productIds.has(id)).length
 
   return (
     <>
@@ -559,7 +582,7 @@ export default function App() {
             products,
             loading: productsLoading,
             variants,
-            prerequisites,
+            prerequisites: livePrerequisites,
             incompatMap,
             autoAdded,
             quantities,
@@ -570,10 +593,10 @@ export default function App() {
             setQuoteForm,
             onSave: saveQuote,
             showToast,
-            presets,
+            presets: livePresets,
             onApplyPreset: applyPreset,
             settings,
-            extras,
+            extras: liveExtras,
             selectedExtras,
             onToggleExtra: toggleExtra,
             onSetExtraCount: setExtraCount,
