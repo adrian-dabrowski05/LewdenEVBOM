@@ -3,10 +3,11 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild,
+  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility,
 } from './types'
 import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 import { quotePricing } from './utils/pricing'
+import { buildIncompatMap } from './utils/compatibility'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -51,6 +52,7 @@ export default function App() {
   const [productsLoading, setProductsLoading] = useState(true)
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [prerequisites, setPrerequisites] = useState<ProductPrerequisite[]>([])
+  const [incompatibilities, setIncompatibilities] = useState<ProductIncompatibility[]>([])
   const [presets, setPresets] = useState<Preset[]>([])
   const [extras, setExtras] = useState<Extra[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
@@ -105,6 +107,14 @@ export default function App() {
     const { data } = await supabase.from('product_prerequisites').select('*').order('sort_order')
     if (data) setPrerequisites(data)
   }
+
+  // Parts that can't go on the same quote (set per part in Admin > Products)
+  useEffect(() => { loadIncompatibilities() }, [])
+  const loadIncompatibilities = async () => {
+    const { data, error } = await supabase.from('product_incompatibilities').select('*')
+    if (!error) setIncompatibilities(data || [])   // table missing = no rules yet
+  }
+  const incompatMap = useMemo(() => buildIncompatMap(incompatibilities), [incompatibilities])
 
   useEffect(() => { loadPresets() }, [])
   const loadPresets = async () => {
@@ -550,6 +560,7 @@ export default function App() {
             loading: productsLoading,
             variants,
             prerequisites,
+            incompatMap,
             autoAdded,
             quantities,
             setQty,
@@ -591,6 +602,7 @@ export default function App() {
             onRefreshProducts={loadProducts} onRefreshPresets={loadPresets}
             onRefreshSettings={loadSettings} onRefreshVariants={loadVariants}
             onRefreshPrerequisites={loadPrerequisites}
+            incompatibilities={incompatibilities} onRefreshIncompatibilities={loadIncompatibilities}
             extras={extras} onRefreshExtras={loadExtras}
             showToast={showToast}
           />

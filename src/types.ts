@@ -56,6 +56,14 @@ export interface ProductPrerequisite {
   created_at: string
 }
 
+// Two parts that can't go on the same quote. Works both ways.
+export interface ProductIncompatibility {
+  id: string
+  product_id: string
+  incompatible_product_id: string
+  created_at: string
+}
+
 export interface Quote {
   id: string
   project_name: string

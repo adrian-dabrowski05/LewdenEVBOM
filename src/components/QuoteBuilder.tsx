@@ -13,12 +13,15 @@ import type { EditingQuote } from '../App'
 import { quotePricing, pctInputOk, MAX_GP_PCT, GP_MODE } from '../utils/pricing'
 import type { QuotePricing } from '../utils/pricing'
 import { extraUnavailableReason, toQuoteExtras, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
+import type { IncompatMap } from '../utils/compatibility'
+import { clashesFor, clashingPairs } from '../utils/compatibility'
 
 interface Props {
   products: Product[]
   loading: boolean
   variants: ProductVariant[]
   prerequisites: ProductPrerequisite[]
+  incompatMap: IncompatMap
   autoAdded: AutoAddedMap
   quantities: QuantityMap
   setQty: (id: string, qty: number) => void
@@ -59,12 +62,46 @@ export function getDisplayPartNumber(product: Product, variant: ProductVariant |
   return product.part_number ? `${product.part_number}${variant.part_number_suffix}` : variant.part_number_suffix
 }
 
-export function Stepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+// disabled = the part can't be added (e.g. it clashes with something on the quote).
+// It can still be taken off if it is already there.
+export function Stepper({ value, onChange, disabled }: { value: number; onChange: (n: number) => void; disabled?: boolean }) {
+  const noAdd = !!disabled
   return (
-    <div className="stepper">
-      <button className="stepper-btn" onPointerDown={(e) => { e.preventDefault(); onChange(Math.max(0, value - 1)) }} aria-label="Decrease">−</button>
-      <input className="stepper-input" type="number" min="0" max="999" value={value || ''} placeholder="0" onChange={(e) => onChange(Math.max(0, parseInt(e.target.value) || 0))} />
-      <button className="stepper-btn" onPointerDown={(e) => { e.preventDefault(); onChange(value + 1) }} aria-label="Increase">+</button>
+    <div className="stepper" style={noAdd && value <= 0 ? { opacity: 0.45 } : undefined} title={noAdd ? 'Not available with what is on the quote' : undefined}>
+      <button className="stepper-btn" disabled={value <= 0} onPointerDown={(e) => { e.preventDefault(); if (value > 0) onChange(Math.max(0, value - 1)) }} aria-label="Decrease">−</button>
+      <input className="stepper-input" type="number" min="0" max="999" value={value || ''} placeholder="0" disabled={noAdd && value <= 0}
+        onChange={(e) => { const n = Math.max(0, parseInt(e.target.value) || 0); if (noAdd && n > value) return; onChange(n) }} />
+      <button className="stepper-btn" disabled={noAdd} style={noAdd ? { cursor: 'not-allowed' } : undefined} onPointerDown={(e) => { e.preventDefault(); if (!noAdd) onChange(value + 1) }} aria-label="Increase">+</button>
+    </div>
+  )
+}
+
+// ── Compatibility: what a part clashes with ──
+// onQuote: the part is already on the quote (so it's a conflict to sort out),
+// otherwise it is greyed out and can't be added.
+export function IncompatNote({ clashIds, productsById, onQuote }: { clashIds: string[]; productsById: Record<string, Product>; onQuote: boolean }) {
+  if (clashIds.length === 0) return null
+  const names = clashIds.map((id) => productsById[id]?.description ?? 'another part')
+  const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3} more` : '')
+  return (
+    <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--danger)' }}>
+      {onQuote ? <>⚠ Incompatible with {shown}. Remove one of them.</> : <>Not available: incompatible with {shown}</>}
+    </div>
+  )
+}
+
+// Red banner listing the incompatible pairs on the quote
+export function IncompatBanner({ incompatMap, qty, productsById }: { incompatMap: IncompatMap; qty: QuantityMap; productsById: Record<string, Product> }) {
+  const pairs = clashingPairs(incompatMap, qty)
+  if (pairs.length === 0) return null
+  const name = (id: string) => productsById[id]?.description ?? 'Unknown part'
+  return (
+    <div style={{ padding: '10px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)', marginBottom: 12, fontSize: 13, color: 'var(--danger)', fontWeight: 500 }}>
+      <div>⚠ {pairs.length} incompatible pair{pairs.length !== 1 ? 's' : ''} on this quote:</div>
+      <ul style={{ margin: '4px 0 0 18px', padding: 0, fontWeight: 400 }}>
+        {pairs.slice(0, 6).map(([a, b]) => <li key={`${a}-${b}`}>{name(a)} + {name(b)}</li>)}
+        {pairs.length > 6 && <li>+{pairs.length - 6} more</li>}
+      </ul>
     </div>
   )
 }
@@ -586,7 +623,7 @@ export function ProfitRebateRows({ pricing, gpValue, rebateValue, onGpChange, on
 }
 
 export default function QuoteBuilder({
-  products, loading, variants, prerequisites, autoAdded,
+  products, loading, variants, prerequisites, incompatMap, autoAdded,
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
@@ -915,6 +952,8 @@ export default function QuoteBuilder({
         </div>
       )}
 
+      <IncompatBanner incompatMap={incompatMap} qty={finalQty} productsById={productsById} />
+
       {searchActive && filtered.length === 0 && (
         <div className="empty-state"><div className="empty-state-icon">🔍</div><h3>No parts found</h3><p>Try a different search term or part number</p></div>
       )}
@@ -962,12 +1001,15 @@ export default function QuoteBuilder({
                         const selectedVariantId = variantSelections[p.id]
                         const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
                         const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
+                        const clashIds = clashesFor(p.id, incompatMap, finalQty)
+                        const blocked = clashIds.length > 0 && onQuote <= 0
                         return (
-                          <tr key={p.id} style={isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
+                          <tr key={p.id} style={blocked ? { background: 'var(--surface-3)', color: 'var(--text-3)' } : isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
                             {canMove && <td style={{ verticalAlign: 'middle' }}><MoveButtons {...moveProps(idx)} /></td>}
                             <td>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
+                              <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
                               {renderAutoAddedNote(p)}
                               {renderExtrasNote(p)}
                               {renderPrereqNote(p)}
@@ -979,7 +1021,7 @@ export default function QuoteBuilder({
                               ) : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}
                             </td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
-                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div></td>
+                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div></td>
                             <td className="right" style={{ fontWeight: onQuote > 0 ? 600 : 400 }}>{lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}</td>
                           </tr>
                         )
@@ -997,8 +1039,10 @@ export default function QuoteBuilder({
                     const selectedVariantId = variantSelections[p.id]
                     const selectedVariant = selectedVariantId ? variantsById[selectedVariantId] : null
                     const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
+                    const clashIds = clashesFor(p.id, incompatMap, finalQty)
+                    const blocked = clashIds.length > 0 && onQuote <= 0
                     return (
-                      <div key={p.id} className="product-card" style={qty > 0 ? { borderColor: isAutoAdded ? 'var(--success)' : 'var(--brand)', borderWidth: '1.5px' } : {}}>
+                      <div key={p.id} className="product-card" style={blocked ? { background: 'var(--surface-3)', opacity: 0.7 } : qty > 0 ? { borderColor: isAutoAdded ? 'var(--success)' : 'var(--brand)', borderWidth: '1.5px' } : {}}>
                         {canMove && (
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
                             <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Position {idx + 1} of {items.length}</span>
@@ -1009,10 +1053,11 @@ export default function QuoteBuilder({
                           <div>
                             <div className="product-card-desc">{p.description}</div>
                             {displayPN && <span className="part-number" style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}>{displayPN}</span>}
+                            <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
                             {renderAutoAddedNote(p)}
                             {renderExtrasNote(p)}
                           </div>
-                          <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} /></div>
+                          <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div>
                         </div>
                         {renderPrereqNote(p, true)}
                         {renderVariantDropdown(p, true)}
