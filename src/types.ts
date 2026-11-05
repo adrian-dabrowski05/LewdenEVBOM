@@ -292,7 +292,8 @@ export interface QuoteBuild {
 // ── TopTer box designer ───────────────────────────────────────
 // Rows of boxes. Boxes next to each other in a row are side by side; joinedLeft
 // says the rep chose to join a box to the one on its left (adds the joining parts).
-export interface DesignItem { uid: string; productId: string; qty: number }
+// seat: where it sits in the box ('c0r1', 'c2', '<item uid>.0', 'top', 'din'); none = loose in the box
+export interface DesignItem { uid: string; productId: string; qty: number; seat?: string | null }
 export interface DesignBox { uid: string; productId: string; joinedLeft: boolean; items: DesignItem[] }
 export interface DesignRow { id: string; boxes: DesignBox[] }
 export interface TopterDesign { rows: DesignRow[] }
