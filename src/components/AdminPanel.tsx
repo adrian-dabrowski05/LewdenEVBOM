@@ -1,10 +1,12 @@
 import { useState, useMemo, Fragment } from 'react'
-import type { Product, ProductVariant, ProductPrerequisite, ProductIncompatibility, Preset, PresetItem, PresetConfiguration, Category, AppSettings, Extra } from '../types'
-import { CATEGORIES } from '../types'
+import type { Product, ProductVariant, ProductPrerequisite, ProductIncompatibility, Preset, PresetItem, PresetConfiguration, Category, AppSettings, Extra, CapacityMap } from '../types'
 import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
 import ExtrasAdmin from './ExtrasAdmin'
+import { CapacityNote } from './CapacityPanel'
 import { pairKey } from '../utils/compatibility'
+import { useSectionConfig, sectionInsert } from '../utils/sections'
+import { SLOTS, readCapacity, hasCapacity } from '../utils/capacity'
 
 interface Props {
   products: Product[]
@@ -25,19 +27,22 @@ interface Props {
 }
 
 type AdminTab = 'products' | 'presets' | 'extras' | 'settings'
-type ProductPanel = 'variants' | 'prerequisites' | 'compat' | null
+type ProductPanel = 'variants' | 'prerequisites' | 'compat' | 'capacity' | null
 
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
-const emptyBuffer = (): EditBuffer => ({ description: '', category: 'Outgoing', part_number: '', factory_cost: '', notes: '' })
+const emptyBuffer = (category: Category = 'Outgoing'): EditBuffer => ({ description: '', category, part_number: '', factory_cost: '', notes: '' })
 
 // ── EditRow defined OUTSIDE all components — prevents remount on keystroke ──
 interface EditRowProps { buf: EditBuffer; onBuf: (b: EditBuffer) => void }
 function EditRow({ buf, onBuf }: EditRowProps) {
+  const cfg = useSectionConfig()
+  // A part sitting in a category this section doesn't list still shows its own category
+  const categories = cfg.categories.includes(buf.category) ? cfg.categories : [buf.category, ...cfg.categories]
   return (
     <tr className="editing-row">
       <td></td>
       <td style={{ minWidth: 200 }}><input className="input input-sm" value={buf.description} onChange={(e) => onBuf({ ...buf, description: e.target.value })} placeholder="Description *" /></td>
-      <td><select className="input input-sm" value={buf.category} onChange={(e) => onBuf({ ...buf, category: e.target.value as Category })}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></td>
+      <td><select className="input input-sm" value={buf.category} onChange={(e) => onBuf({ ...buf, category: e.target.value as Category })}>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select></td>
       <td><input className="input input-sm" style={{ fontFamily: 'var(--mono)', fontSize: 12 }} value={buf.part_number} onChange={(e) => onBuf({ ...buf, part_number: e.target.value })} placeholder="LCR1234" /></td>
       <td><input className="input input-sm" type="number" step="0.01" min="0" style={{ textAlign: 'right' }} value={buf.factory_cost} onChange={(e) => onBuf({ ...buf, factory_cost: e.target.value })} placeholder="0.00" /></td>
       <td><input className="input input-sm" value={buf.notes} onChange={(e) => onBuf({ ...buf, notes: e.target.value })} placeholder="Optional note" /></td>
@@ -175,6 +180,7 @@ function VariantManager({ product, variants, onRefresh, showToast }: {
 function PrerequisiteManager({ product, products, prerequisites, onRefresh, showToast }: {
   product: Product; products: Product[]; prerequisites: ProductPrerequisite[]; onRefresh: () => void; showToast: Props['showToast']
 }) {
+  const cfg = useSectionConfig()
   const [newProductId, setNewProductId] = useState('')
   const [newQty, setNewQty] = useState('1')
   const [newNote, setNewNote] = useState('')
@@ -249,7 +255,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Add prerequisite product</label>
           <select className="input input-sm" value={newProductId} onChange={(e) => setNewProductId(e.target.value)}>
             <option value="">Select product…</option>
-            {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+            {cfg.categories.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
           </select>
         </div>
         <div style={{ width: 72 }}>
@@ -272,6 +278,7 @@ function PrerequisiteManager({ product, products, prerequisites, onRefresh, show
 function CompatibilityManager({ product, products, incompatibilities, onRefresh, showToast }: {
   product: Product; products: Product[]; incompatibilities: ProductIncompatibility[]; onRefresh: () => void; showToast: Props['showToast']
 }) {
+  const cfg = useSectionConfig()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
@@ -359,7 +366,7 @@ function CompatibilityManager({ product, products, incompatibilities, onRefresh,
             </button>
           </div>
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {CATEGORIES.map((cat) => {
+            {cfg.categories.map((cat) => {
               const cp = shown.filter((p) => p.category === cat)
               if (!cp.length) return null
               return (
@@ -382,10 +389,73 @@ function CompatibilityManager({ product, products, incompatibilities, onRefresh,
   )
 }
 
+// ── Capacity manager (TopTer) ─────────────────────────────────
+// Boards, back boxes and flanges say what they have room for; sockets, flanges
+// and DIN devices say what they use. The builders add up the whole quote.
+function CapacityManager({ product, onRefresh, showToast }: { product: Product; onRefresh: () => void; showToast: Props['showToast'] }) {
+  const toText = (m?: CapacityMap) => Object.fromEntries(Object.entries(m ?? {}).map(([k, v]) => [k, String(v)])) as Record<string, string>
+  const initial = readCapacity(product.capacity)
+  const [provides, setProvides] = useState<Record<string, string>>(() => toText(initial.provides))
+  const [uses, setUses] = useState<Record<string, string>>(() => toText(initial.uses))
+  const [saving, setSaving] = useState(false)
+
+  const toMap = (m: Record<string, string>): CapacityMap | undefined => {
+    const out: CapacityMap = {}
+    Object.entries(m).forEach(([k, v]) => { const n = parseFloat(v); if (isFinite(n) && n > 0) out[k] = n })
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  const save = async (clear = false) => {
+    const p = clear ? undefined : toMap(provides)
+    const u = clear ? undefined : toMap(uses)
+    const capacity = p || u ? { ...(p ? { provides: p } : {}), ...(u ? { uses: u } : {}) } : null
+    setSaving(true)
+    const { error } = await supabase.from('products').update({ capacity }).eq('id', product.id)
+    setSaving(false)
+    if (error) { showToast(/capacity/.test(error.message) ? 'Run supabase/topter-section.sql in Supabase first' : `Could not save: ${error.message}`, 'error'); return }
+    if (clear) { setProvides({}); setUses({}) }
+    showToast(clear ? 'Capacity cleared' : 'Capacity saved'); onRefresh()
+  }
+
+  const numberBox = (value: string, onChange: (v: string) => void, label: string) => (
+    <input className="input input-sm" type="number" min="0" step="1" placeholder="—" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
+      style={{ width: 76, fontFamily: 'var(--mono)', textAlign: 'center' }} />
+  )
+
+  return (
+    <div style={{ padding: '12px 14px', background: 'var(--info-bg)', border: '1px solid var(--info)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--info)', marginBottom: 8 }}>Capacity</div>
+      <p style={{ fontSize: 11, color: 'var(--info)', marginBottom: 10, opacity: 0.9 }}>
+        Boards, back boxes and flanges: fill in what they have <strong>room for</strong>. Sockets, flanges and DIN devices: fill in what they <strong>use</strong>. The quote adds up every part, so combined boards count together. Leave a part blank if it takes no space.
+      </p>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 84px 84px', gap: 8, padding: '6px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+          <span>Space</span><span style={{ textAlign: 'center' }}>Room for</span><span style={{ textAlign: 'center' }}>Uses</span>
+        </div>
+        {SLOTS.map((slot) => (
+          <div key={slot.key} style={{ display: 'grid', gridTemplateColumns: '1fr 84px 84px', gap: 8, alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{slot.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{slot.hint}</div>
+            </div>
+            {numberBox(provides[slot.key] ?? '', (v) => setProvides({ ...provides, [slot.key]: v }), `${slot.label}: room for`)}
+            {numberBox(uses[slot.key] ?? '', (v) => setUses({ ...uses, [slot.key]: v }), `${slot.label}: uses`)}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+        <button className="btn btn-sm" onClick={() => save(true)} disabled={saving}>Clear</button>
+        <button className="btn btn-sm btn-primary" onClick={() => save()} disabled={saving}>{saving ? 'Saving…' : 'Save capacity'}</button>
+      </div>
+    </div>
+  )
+}
+
 // ── Configuration manager ─────────────────────────────────────
 function ConfigurationManager({ preset, products, onRefresh, showToast }: {
   preset: Preset; products: Product[]; onRefresh: () => void; showToast: Props['showToast']
 }) {
+  const cfg = useSectionConfig()
   const [newLabel, setNewLabel] = useState('')
   const [newSuffix, setNewSuffix] = useState('')
   const [saving, setSaving] = useState(false)
@@ -489,7 +559,7 @@ function ConfigurationManager({ preset, products, onRefresh, showToast }: {
                     <label style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Add product</label>
                     <select className="input input-sm" value={addItemProductId[config.id] ?? ''} onChange={(e) => setAddItemProductId((p) => ({ ...p, [config.id]: e.target.value }))}>
                       <option value="">Select product…</option>
-                      {CATEGORIES.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+                      {cfg.categories.map((cat) => { const cp = available.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
                     </select>
                   </div>
                   <div style={{ width: 72 }}>
@@ -528,13 +598,14 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
   onRefreshProducts: () => void; onRefreshVariants: () => void; onRefreshPrerequisites: () => void; onRefreshIncompatibilities: () => void; onRefreshPresets: () => void
   showToast: Props['showToast']
 }) {
+  const cfg = useSectionConfig()
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editBuf, setEditBuf] = useState<EditBuffer>(emptyBuffer())
+  const [editBuf, setEditBuf] = useState<EditBuffer>(emptyBuffer(cfg.defaultCategory))
   const [openPanel, setOpenPanel] = useState<{ id: string; panel: ProductPanel } | null>(null)
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
-  const [newBuf, setNewBuf] = useState<EditBuffer>(emptyBuffer())
+  const [newBuf, setNewBuf] = useState<EditBuffer>(emptyBuffer(cfg.defaultCategory))
   const [reviewed, setReviewed] = useState<Set<string>>(new Set())
 
   const filtered = useMemo(() => {
@@ -607,10 +678,10 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
     if (!newBuf.description.trim()) { showToast('Description is required', 'error'); return }
     setSaving(true)
     const maxOrder = Math.max(0, ...products.filter((p) => p.category === newBuf.category).map((p) => p.sort_order))
-    const { error } = await supabase.from('products').insert({ description: newBuf.description.trim(), category: newBuf.category, part_number: newBuf.part_number.trim() || null, factory_cost: newBuf.factory_cost ? parseFloat(newBuf.factory_cost) : null, notes: newBuf.notes.trim() || null, sort_order: maxOrder + 10, is_active: true })
+    const { error } = await supabase.from('products').insert({ description: newBuf.description.trim(), category: newBuf.category, part_number: newBuf.part_number.trim() || null, factory_cost: newBuf.factory_cost ? parseFloat(newBuf.factory_cost) : null, notes: newBuf.notes.trim() || null, sort_order: maxOrder + 10, is_active: true, ...sectionInsert(cfg) })
     setSaving(false)
     if (error) { showToast('Failed to add product', 'error'); return }
-    showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer()); onRefreshProducts()
+    showToast('Product added'); setAddingNew(false); setNewBuf(emptyBuffer(cfg.defaultCategory)); onRefreshProducts()
   }
 
   const togglePanel = (productId: string, panel: ProductPanel) => setOpenPanel((prev) => prev?.id === productId && prev?.panel === panel ? null : { id: productId, panel })
@@ -623,7 +694,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `lewden-product-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+    a.href = url; a.download = `${cfg.key === 'ev' ? 'lewden-product-catalogue' : `lewden-${cfg.key}-catalogue`}-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -636,7 +707,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
             Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer()) }}>+ Add product</button>
+          <button className="btn btn-primary" onClick={() => { setAddingNew(true); setNewBuf(emptyBuffer(cfg.defaultCategory)) }}>+ Add product</button>
         </div>
       </div>
 
@@ -708,7 +779,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                       <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                         <input type="checkbox" checked={isReviewed} onChange={() => toggleReviewed(p.id)} style={{ width: 15, height: 15, accentColor: 'var(--success)', cursor: 'pointer' }} />
                       </td>
-                      <td style={isReviewed ? { textDecoration: 'line-through', color: 'var(--text-3)' } : {}}>{p.description}</td>
+                      <td style={isReviewed ? { textDecoration: 'line-through', color: 'var(--text-3)' } : {}}>{p.description}{cfg.usesCapacity && <CapacityNote product={p} />}</td>
                       <td><span style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{p.category}</span></td>
                       <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 500 }}>{p.factory_cost != null ? `£${p.factory_cost.toFixed(2)}` : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>—</span>}</td>
@@ -718,6 +789,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                           <button className="btn btn-sm" style={prereqCount > 0 ? { borderColor: 'var(--success)', color: 'var(--success)' } : {}} onClick={() => togglePanel(p.id, 'prerequisites')}>Prereqs{prereqCount > 0 ? ` (${prereqCount})` : ''}</button>
                           <button className="btn btn-sm" style={incompatCount > 0 ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : {}} onClick={() => togglePanel(p.id, 'compat')}>Incompatible{incompatCount > 0 ? ` (${incompatCount})` : ''}</button>
                           <button className="btn btn-sm" style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}} onClick={() => togglePanel(p.id, 'variants')}>Variants{variantCount > 0 ? ` (${variantCount})` : ''}</button>
+                          {cfg.usesCapacity && <button className="btn btn-sm" style={hasCapacity(p) ? { borderColor: 'var(--info)', color: 'var(--info)' } : {}} onClick={() => togglePanel(p.id, 'capacity')}>Capacity{hasCapacity(p) ? ' ✓' : ''}</button>}
                           <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
                           <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
                         </div>
@@ -739,6 +811,11 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                       <CompatibilityManager product={p} products={products} incompatibilities={incompatibilities} onRefresh={onRefreshIncompatibilities} showToast={showToast} />
                     </td></tr>
                   )}
+                  {currentPanel === 'capacity' && !isEditingThis && (
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <CapacityManager product={p} onRefresh={onRefreshProducts} showToast={showToast} />
+                    </td></tr>
+                  )}
                 </Fragment>
               )
             })}
@@ -751,6 +828,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
 
 // ── Presets tab ───────────────────────────────────────────────
 function PresetsTab({ products, presets, onRefresh, showToast }: { products: Product[]; presets: Preset[]; onRefresh: () => void; showToast: Props['showToast'] }) {
+  const cfg = useSectionConfig()
   const [expanded, setExpanded] = useState<string | null>(null)
   const [creatingNew, setCreatingNew] = useState(false)
   const [newName, setNewName] = useState('')
@@ -767,7 +845,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
   const createPreset = async () => {
     if (!newName.trim()) { showToast('Preset name is required', 'error'); return }
     setSaving(true)
-    const { data, error } = await supabase.from('presets').insert({ name: newName.trim(), description: newDesc.trim() || null, default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null, default_labour_rate_per_min: null }).select().single()
+    const { data, error } = await supabase.from('presets').insert({ name: newName.trim(), description: newDesc.trim() || null, default_labour_minutes: newLabourMins ? parseFloat(newLabourMins) : null, default_labour_rate_per_min: null, ...sectionInsert(cfg) }).select().single()
     setSaving(false)
     if (error || !data) { showToast('Failed to create preset', 'error'); return }
     showToast('Preset created'); setCreatingNew(false); setNewName(''); setNewDesc(''); setNewLabourMins(''); setExpanded(data.id); onRefresh()
@@ -907,7 +985,7 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
                     <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Add product</label>
                     <select className="input input-sm" value={addItemProductId} onChange={(e) => setAddItemProductId(e.target.value)}>
                       <option value="">Select a product…</option>
-                      {CATEGORIES.map((cat) => { const cp = availableProducts.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
+                      {cfg.categories.map((cat) => { const cp = availableProducts.filter((p) => p.category === cat); if (!cp.length) return null; return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup> })}
                     </select>
                   </div>
                   <div style={{ width: 80 }}>
@@ -928,6 +1006,9 @@ function PresetsTab({ products, presets, onRefresh, showToast }: { products: Pro
 
 // ── Settings tab ──────────────────────────────────────────────
 function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings; onRefresh: () => void; showToast: Props['showToast'] }) {
+  // Each section has its own defaults: EV uses the original keys, TopTer the same keys starting "topter_"
+  const cfg = useSectionConfig()
+  const keyOf = (key: string) => cfg.settingsPrefix + key
   const [upliftPct, setUpliftPct] = useState(String(settings.hardware_uplift_pct))
   const [labourRate, setLabourRate] = useState(String(settings.labour_rate_per_min))
   const [reviewedAt, setReviewedAt] = useState(settings.prices_reviewed_at)
@@ -937,7 +1018,9 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
     const val = parseFloat(value)
     if (isNaN(val) || val < min || (max !== null && val > max)) { showToast(`Enter a valid ${label}`, 'error'); return false }
     setSaving(true)
-    const { error } = await supabase.from('settings').update({ value: String(val) }).eq('key', key)
+    // Adds the row if it isn't there yet (e.g. TopTer before its SQL has been run)
+    let { data, error } = await supabase.from('settings').update({ value: String(val) }).eq('key', keyOf(key)).select()
+    if (!error && (data ?? []).length === 0) ({ error } = await supabase.from('settings').insert({ key: keyOf(key), value: String(val) }))
     setSaving(false)
     if (error) { showToast('Failed to save setting', 'error'); return false }
     return true
@@ -948,8 +1031,8 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
   // Adds the settings row if it isn't there yet (supabase/prices-reviewed.sql adds it too).
   const saveReviewedAt = async (value: string) => {
     setSaving(true)
-    let { data, error } = await supabase.from('settings').update({ value }).eq('key', 'prices_reviewed_at').select()
-    if (!error && (data ?? []).length === 0) ({ error } = await supabase.from('settings').insert({ key: 'prices_reviewed_at', value }))
+    let { data, error } = await supabase.from('settings').update({ value }).eq('key', keyOf('prices_reviewed_at')).select()
+    if (!error && (data ?? []).length === 0) ({ error } = await supabase.from('settings').insert({ key: keyOf('prices_reviewed_at'), value }))
     setSaving(false)
     if (error) { showToast(`Failed to save date: ${error.message}`, 'error'); return }
     setReviewedAt(value)
@@ -962,9 +1045,14 @@ function SettingsTab({ settings, onRefresh, showToast }: { settings: AppSettings
 
   return (
     <div style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {cfg.key !== 'ev' && (
+        <div style={{ padding: '10px 14px', background: 'var(--info-bg)', border: '1px solid var(--info)', borderRadius: 'var(--radius-md)', fontSize: 13, color: 'var(--info)' }}>
+          These settings are for <strong>{cfg.label}</strong> quotes only. EV feeder pillars keep their own.
+        </div>
+      )}
       <div className="card" style={{ padding: '20px 24px' }}>
         <h3 style={{ marginBottom: 4 }}>Prices last reviewed</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>Shown to everyone at the top of the quote builder. Leave blank and save to hide it.</p>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 20 }}>{cfg.key === 'ev' ? 'Shown to everyone at the top of the quote builder.' : `Shown at the top of the ${cfg.label} quote builder.`} Leave blank and save to hide it.</p>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 180px' }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</label>

@@ -41,7 +41,7 @@ export default function AdminLogin({ onClose, showToast }: Props) {
           </div>
           <div>
             <h2 style={{ fontSize: 16, marginBottom: 2 }}>Admin sign in</h2>
-            <p style={{ fontSize: 13, color: 'var(--text-2)' }}>Lewden EV BOM Calculator</p>
+            <p style={{ fontSize: 13, color: 'var(--text-2)' }}>Lewden Quoting Tool</p>
           </div>
         </div>
 
