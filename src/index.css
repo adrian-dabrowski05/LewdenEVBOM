@@ -859,3 +859,10 @@ select.input {
   .main { padding: 28px 32px; }
   .total-bar { margin: 0 -32px; padding: 14px 32px; }
 }
+
+/* ── TopTer box designer ── */
+/* Parts list: a short scrolling list above the wall on a phone, a sticky column beside it on a wide screen */
+.designer-palette { max-height: 46dvh; }
+@media (min-width: 900px) {
+  .designer-palette { position: sticky; top: 8px; max-width: 380px; max-height: calc(100dvh - 24px); }
+}

@@ -56,6 +56,7 @@ interface Props {
   onMoveProduct: (productId: string, groupIds: string[], dir: -1 | 1) => void
   onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
   reordering: boolean
+  startAtReview?: boolean   // opened from the box designer's "Review & save"
 }
 
 // ── Steps ─────────────────────────────────────────────────────
@@ -180,9 +181,9 @@ export default function TopterStepBuilder({
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext,
   editingQuote, onCancelEdit,
-  isAdmin, onMoveProduct, onMoveExtra, reordering,
+  isAdmin, onMoveProduct, onMoveExtra, reordering, startAtReview = false,
 }: Props) {
-  const [stepIdx, setStepIdx] = useState(0)
+  const [stepIdx, setStepIdx] = useState(startAtReview ? STEPS.length - 1 : 0)
   const [reorderToggle, setReorderToggle] = useState(false)
   const reorderMode = isAdmin && reorderToggle
   const [saving, setSaving] = useState(false)

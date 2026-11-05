@@ -286,4 +286,13 @@ export interface QuoteBuild {
   extra_costs?: ExtraCostMap  // rep-entered costs of rep-priced extras
   build_context: BuildContext
   labour_minutes: string      // rep's minutes, before extras labour
+  design?: TopterDesign       // TopTer designer layout (boxes, parts in them, joints)
 }
+
+// ── TopTer box designer ───────────────────────────────────────
+// Rows of boxes. Boxes next to each other in a row are side by side; joinedLeft
+// says the rep chose to join a box to the one on its left (adds the joining parts).
+export interface DesignItem { uid: string; productId: string; qty: number }
+export interface DesignBox { uid: string; productId: string; joinedLeft: boolean; items: DesignItem[] }
+export interface DesignRow { id: string; boxes: DesignBox[] }
+export interface TopterDesign { rows: DesignRow[] }

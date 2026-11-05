@@ -4,12 +4,13 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility, Section,
+  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility, Section, TopterDesign,
 } from './types'
 import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 import { quotePricing } from './utils/pricing'
 import { buildIncompatMap } from './utils/compatibility'
 import { SECTIONS, SectionContext, sectionOf, sectionInsert } from './utils/sections'
+import { EMPTY_DESIGN, readDesign } from './utils/design'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -19,6 +20,8 @@ import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
 import StepBuilder from './components/StepBuilder'
 import TopterStepBuilder from './components/TopterStepBuilder'
+import TopterDesigner, { TopterModeSwitch } from './components/TopterDesigner'
+import type { TopterMode } from './components/TopterDesigner'
 import SectionSwitch from './components/SectionSwitch'
 import SavedQuotes from './components/SavedQuotes'
 import AdminPanel from './components/AdminPanel'
@@ -123,6 +126,7 @@ export default function App() {
   const [extraCosts, setExtraCosts] = useSectionState<ExtraCostMap>(activeSection, sectionRef, () => ({}))
   const [buildContext, setBuildContext] = useSectionState<BuildContext>(activeSection, sectionRef, () => EMPTY_CONTEXT)
   const [editingQuote, setEditingQuote] = useSectionState<EditingQuote | null>(activeSection, sectionRef, () => null)
+  const [design, setDesign] = useSectionState<TopterDesign>(activeSection, sectionRef, () => EMPTY_DESIGN)   // TopTer box designer layout
 
   // Only parts still in the catalogue. A removed part can still be listed in a
   // preset, a prerequisite or an extra (removing a part only hides it, so old
@@ -155,7 +159,36 @@ export default function App() {
     const next = !stepMode
     setStepMode(next)
     try { localStorage.setItem('builder_mode', next ? 'steps' : 'full') } catch { /* private window etc. */ }
+    setDesignerOn(false)
+    setStartAtReview(false)
     setView('builder')
+  }
+
+  // TopTer only: the drag-and-drop box designer, a third mode next to the list and steps
+  const [designerOn, setDesignerOnState] = useState<boolean>(() => {
+    try { return localStorage.getItem('topter_designer') === 'on' } catch { return false }
+  })
+  const setDesignerOn = (on: boolean) => {
+    setDesignerOnState(on)
+    try { localStorage.setItem('topter_designer', on ? 'on' : 'off') } catch { /* private window etc. */ }
+  }
+  const [startAtReview, setStartAtReview] = useState(false)   // designer's "Review & save" opens the step builder's last step
+  const topterMode: TopterMode = designerOn ? 'designer' : stepMode ? 'steps' : 'list'
+  const changeTopterMode = (mode: TopterMode) => {
+    setStartAtReview(false)
+    setDesignerOn(mode === 'designer')
+    if (mode !== 'designer') {
+      const steps = mode === 'steps'
+      setStepMode(steps)
+      try { localStorage.setItem('builder_mode', steps ? 'steps' : 'full') } catch { /* private window etc. */ }
+    }
+  }
+  const openReview = () => {
+    setDesignerOn(false)
+    setStepMode(true)
+    try { localStorage.setItem('builder_mode', 'steps') } catch { /* private window etc. */ }
+    setStartAtReview(true)
+    window.scrollTo({ top: 0 })
   }
 
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -415,7 +448,13 @@ export default function App() {
     setExtraCosts({})
     setBuildContext(EMPTY_CONTEXT)
     setEditingQuote(null)
-  }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote])
+    setDesign(EMPTY_DESIGN)
+  }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote, setDesign])
+
+  // Clearing the quote in the list or step builder also empties the designer
+  useEffect(() => {
+    if (design.rows.length > 0 && Object.keys(quantities).length === 0) setDesign(EMPTY_DESIGN)
+  }, [design, quantities, setDesign])
 
   // asNew: when editing, save a copy instead of overwriting the original
   const saveQuote = async (formData: QuoteFormData, asNew = false): Promise<boolean> => {
@@ -445,6 +484,8 @@ export default function App() {
       extra_costs: extraCosts,
       build_context: buildContext,
       labour_minutes: formData.labour_minutes,
+      // TopTer: the designer's boxes, so editing the quote brings the layout back
+      ...(cfg.key === 'topter' && design.rows.length > 0 ? { design } : {}),
     }
 
     const quoteRow = {
@@ -558,6 +599,7 @@ export default function App() {
     setExtraCounts(build?.extra_counts ?? {})
     setExtraCosts(build?.extra_costs ?? {})
     setBuildContext(build?.build_context ?? EMPTY_CONTEXT)
+    setDesign(readDesign(build?.design))
     setQuoteForm({
       project_name: quote.project_name,
       customer_name: quote.customer_name ?? '',
@@ -636,6 +678,7 @@ export default function App() {
           </div>
         )}
         {view === 'builder' && <PricesReviewed date={settings.prices_reviewed_at} />}
+        {view === 'builder' && activeSection === 'topter' && <TopterModeSwitch mode={topterMode} onChange={changeTopterMode} />}
         {view === 'builder' && (() => {
           const builderProps = {
             products,
@@ -672,8 +715,20 @@ export default function App() {
             onMoveExtra: moveExtra,
             reordering,
           }
+          if (activeSection === 'topter' && designerOn) {
+            return (
+              <TopterDesigner
+                products={products} loading={productsLoading}
+                quantities={quantities} setQty={setQty}
+                design={design} setDesign={setDesign}
+                quoteForm={quoteForm} settings={settings} extrasResult={extrasResult}
+                showToast={showToast} editingQuote={editingQuote} onCancelEdit={cancelEdit}
+                onReview={openReview}
+              />
+            )
+          }
           if (!stepMode) return <QuoteBuilder key={activeSection} {...builderProps} />
-          return activeSection === 'topter' ? <TopterStepBuilder {...builderProps} /> : <StepBuilder {...builderProps} />
+          return activeSection === 'topter' ? <TopterStepBuilder {...builderProps} startAtReview={startAtReview} /> : <StepBuilder {...builderProps} />
         })()}
         {view === 'quotes' && (
           <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} onEdit={editQuote} isAdmin={isAdmin} />
