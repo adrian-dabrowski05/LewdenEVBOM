@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import type { Product, QuantityMap, QuoteFormData, AppSettings, TopterDesign, DesignBox, DesignRow } from '../types'
+import type { Product, QuantityMap, QuoteFormData, AppSettings, TopterDesign, DesignBox, DesignRow, DesignItem } from '../types'
 import { EXTRAS_CATEGORY } from '../types'
 import type { ExtrasResult } from '../utils/extras'
 import { quotePricing } from '../utils/pricing'
 import { capacityUsage, capacityText, readCapacity } from '../utils/capacity'
-import { pictureUrl } from '../utils/pictures'
 import {
-  JOIN_PARTS, isBox, isJoinable, designCounts, missingJoinParts, jointCount, assemblies,
-  boxSizeMm, boxLayout, tilesUsed, dinUsed, placeOf, newUid,
+  JOIN_PARTS, isBox, isJoinable, designCounts, missingJoinParts, jointCount, assemblies, newUid,
+  boxShape, allSeats, occupancy, spanAt, fitOf, fitHint, withChildren, dinSpace, partSeats,
+  voltColour, ampsOf, dinLabel,
 } from '../utils/design'
+import type { Seat, BoxShape } from '../utils/design'
 import { qtyStep, fmt } from './QuoteBuilder'
 import CapacityPanel from './CapacityPanel'
 import { PartThumb } from './PartPicture'
@@ -83,6 +84,7 @@ export default function TopterDesigner({
   const [dragging, setDragging] = useState<Payload | null>(null)
   const [overSpot, setOverSpot] = useState<string | null>(null)   // highlighted drop target
   const [asks, setAsks] = useState<JoinAsk[]>([])
+  const [selected, setSelected] = useState<string | null>(null)   // item uid tapped in a box (shows its remove button)
   const dragRef = useRef<Payload | null>(null)
 
   const productsById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])) as Record<string, Product>, [products])
@@ -215,41 +217,94 @@ export default function TopterDesigner({
     if (payload.kind === 'item') showToast('Drop it into a box, or on Remove to take it off', 'error')
   }
 
-  const dropOnBox = (payload: Payload, boxUid: string) => {
+  // ── Putting parts into boxes ──
+  // seatIds: the seats to try, in order (null = the first free seat the part fits).
+  // moveUid: an item already in a box that is being moved (it brings what sits on it).
+  type PlaceResult = { next: TopterDesign } | { error: string }
+  const placePart = (d: TopterDesign, boxUid: string, p: Product, seatIds: string[] | null, moveUid?: string, qty?: number): PlaceResult => {
+    const next = clone(d)
+    let moved: DesignItem[] = []
+    if (moveUid) {
+      next.rows.forEach((r) => r.boxes.forEach((b) => {
+        if (!b.items.some((i) => i.uid === moveUid)) return
+        const ids = withChildren(b.items, moveUid)
+        moved = b.items.filter((i) => ids.has(i.uid))
+        b.items = b.items.filter((i) => !ids.has(i.uid))
+      }))
+    }
+    const head = moved.find((i) => i.uid === moveUid)
+    const at = findBox(next, boxUid)
+    const bp = at ? productsById[at.box.productId] : undefined
+    if (!at || !bp) return { error: 'That box is no longer on the wall' }
+    const box = at.box
+    const shape = boxShape(bp)
+    const fit = fitOf(p)
+
+    // DIN devices go on the rail behind the window
+    if (fit.kind === 'din') {
+      const space = dinSpace(shape, box.items, productsById)
+      const n = head?.qty ?? qty ?? qtyStep(p)
+      const need = round2((readCapacity(p.capacity).uses?.din ?? 0) * n)
+      if (space.total === 0) return { error: shape.top === 'blind' ? 'This board has a blind cover: drop a window cover (P579451/2/3) on it first for a DIN rail' : 'This box has no DIN rail' }
+      if (space.used + need > space.total + 0.001) return { error: `Not enough DIN space: ${space.used} of ${space.total} modules used, this needs ${need}` }
+      if (head) { head.seat = 'din'; box.items.push(...moved); return { next } }
+      const same = box.items.find((i) => i.productId === p.id && i.seat === 'din')
+      if (same) same.qty = round2(same.qty + n)
+      else box.items.push({ uid: newUid(), productId: p.id, qty: n, seat: 'din' })
+      return { next }
+    }
+    // Anything that doesn't sit in a seat (handles, earth bars...) goes with the box
+    if (fit.kind === 'none') {
+      const n = head?.qty ?? qty ?? qtyStep(p)
+      if (head) { head.seat = null; box.items.push(...moved); return { next } }
+      const same = box.items.find((i) => i.productId === p.id && !i.seat)
+      if (same) same.qty = round2(same.qty + n)
+      else box.items.push({ uid: newUid(), productId: p.id, qty: n, seat: null })
+      return { next }
+    }
+    const seats = allSeats(shape, box.items, productsById)
+    const occ = occupancy(seats, box.items, productsById)
+    const candidates = seatIds ? seatIds.map((id) => seats.find((s) => s.id === id)).filter((s): s is Seat => !!s) : seats
+    for (const s of candidates) {
+      if (!spanAt(seats, occ, s, fit)) continue
+      if (head) { head.seat = s.id; head.qty = 1; box.items.push(...moved) }
+      else box.items.push({ uid: newUid(), productId: p.id, qty: 1, seat: s.id })
+      return { next }
+    }
+    if (seatIds && seatIds.length === 1 && candidates[0] && occ[candidates[0].id]) return { error: 'That place is taken. Remove what is there first.' }
+    return { error: seatIds ? fitHint(fit.kind) : `No free place for it in this box. ${fitHint(fit.kind)}` }
+  }
+
+  const productOf = (payload: Payload): { product: Product | undefined; moveUid?: string } => {
+    if (payload.kind === 'part' || payload.kind === 'loose') return { product: productsById[payload.productId] }
+    if (payload.kind === 'item') {
+      for (const r of design.rows) for (const b of r.boxes) {
+        const it = b.items.find((i) => i.uid === payload.itemUid)
+        if (it) return { product: productsById[it.productId], moveUid: it.uid }
+      }
+    }
+    return { product: undefined }
+  }
+
+  // Drop on a box (seatIds null), on one seat, or on a part (its free seats)
+  const dropInto = (payload: Payload, boxUid: string, seatIds: string[] | null) => {
     const at = findBox(design, boxUid)
     if (!at) return
     if (payload.kind === 'box') {
-      if (payload.uid === boxUid) return
-      dropBox(payload, { rowId: at.row.id, index: at.index + 1 })
+      if (payload.uid !== boxUid) dropBox(payload, { rowId: at.row.id, index: at.index + 1 })
       return
     }
-    if (payload.kind === 'item') {
-      if (payload.boxUid === boxUid) return
-      const next = clone(design)
-      const from = findBox(next, payload.boxUid)
-      const to = findBox(next, boxUid)
-      if (!from || !to) return
-      const idx = from.box.items.findIndex((i) => i.uid === payload.itemUid)
-      if (idx === -1) return
-      const [item] = from.box.items.splice(idx, 1)
-      const same = to.box.items.find((i) => i.productId === item.productId)
-      if (same) same.qty = round2(same.qty + item.qty)
-      else to.box.items.push(item)
-      commit(next)
-      return
-    }
-    const p = productsById[payload.productId]
+    const { product: p, moveUid } = productOf(payload)
     if (!p) return
     if (isBox(p)) { dropBox(payload, { rowId: at.row.id, index: at.index + 1 }); return }
-    // A part from "not in a box" brings all of it that wasn't placed yet, without adding to the quote
-    const addQty = payload.kind === 'loose' ? (loose.find((x) => x.p.id === p.id)?.n ?? 0) : qtyStep(p)
-    if (addQty <= 0) return
-    const next = clone(design)
-    const box = findBox(next, boxUid)!.box
-    const same = box.items.find((i) => i.productId === p.id)
-    if (same) same.qty = round2(same.qty + addQty)
-    else box.items.push({ uid: newUid(), productId: p.id, qty: addQty })
-    commit(next, payload.kind === 'loose' ? { [p.id]: addQty } : undefined)
+    const fit = fitOf(p)
+    const looseQty = payload.kind === 'loose' ? (loose.find((x) => x.p.id === p.id)?.n ?? 0) : 0
+    if (payload.kind === 'loose' && looseQty <= 0) return
+    const qty = payload.kind === 'loose' ? (fit.kind === 'din' || fit.kind === 'none' ? looseQty : 1) : undefined
+    const res = placePart(design, boxUid, p, seatIds, moveUid, qty)
+    if ('error' in res) { showToast(res.error, 'error'); return }
+    commit(res.next, payload.kind === 'loose' ? { [p.id]: qty ?? 1 } : undefined)
+    setSelected(null)
   }
 
   const removeBox = (uid: string) => {
@@ -258,11 +313,33 @@ export default function TopterDesigner({
     queueAsks(lifted.next, lifted.ask)
   }
 
-  const setItemQty = (boxUid: string, itemUid: string, qty: number) => {
+  // Take a part off (with whatever sits on it)
+  const removeItem = (boxUid: string, itemUid: string) => {
     const next = clone(design)
     const at = findBox(next, boxUid)
     if (!at) return
-    at.box.items = qty <= 0 ? at.box.items.filter((i) => i.uid !== itemUid) : at.box.items.map((i) => (i.uid === itemUid ? { ...i, qty: round2(qty) } : i))
+    const ids = withChildren(at.box.items, itemUid)
+    at.box.items = at.box.items.filter((i) => !ids.has(i.uid))
+    commit(next)
+    setSelected(null)
+  }
+
+  // DIN devices and loose parts can change amount; parts in seats are one each
+  const setItemQty = (boxUid: string, itemUid: string, qty: number) => {
+    if (qty <= 0) { removeItem(boxUid, itemUid); return }
+    const next = clone(design)
+    const at = findBox(next, boxUid)
+    if (!at) return
+    const item = at.box.items.find((i) => i.uid === itemUid)
+    const p = item ? productsById[item.productId] : undefined
+    const bp = productsById[at.box.productId]
+    if (!item || !p || !bp) return
+    if (item.seat === 'din') {
+      const space = dinSpace(boxShape(bp), at.box.items, productsById)
+      const extra = (readCapacity(p.capacity).uses?.din ?? 0) * (qty - item.qty)
+      if (extra > 0 && space.used + extra > space.total + 0.001) { showToast(`Not enough DIN space: ${space.used} of ${space.total} modules used`, 'error'); return }
+    }
+    item.qty = round2(qty)
     commit(next)
   }
 
@@ -289,7 +366,7 @@ export default function TopterDesigner({
 
   const dropRemove = (payload: Payload) => {
     if (payload.kind === 'box') removeBox(payload.uid)
-    else if (payload.kind === 'item') setItemQty(payload.boxUid, payload.itemUid, 0)
+    else if (payload.kind === 'item') removeItem(payload.boxUid, payload.itemUid)
   }
 
   // ── Drag and tap plumbing ──
@@ -365,19 +442,35 @@ export default function TopterDesigner({
   const renderJoint = (left: DesignBox, right: DesignBox) => {
     const canJoin = isJoinable(productsById[left.productId]) && isJoinable(productsById[right.productId])
     const joined = right.joinedLeft
+    const plate = (top: string) => (
+      <span aria-hidden style={{ position: 'absolute', top, left: 0, transform: 'translateX(-50%)', width: 22, height: 12, borderRadius: 2, background: 'linear-gradient(#e9ecef, #b5bbc1)', border: '1px solid #8d9399', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }} />
+    )
     return (
       <div style={{ position: 'relative', width: 0, alignSelf: 'stretch', zIndex: 2 }}>
+        {joined && plate('14%')}
+        {joined && plate('min(72%, 220px)')}
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); if (canJoin) setJoined(right.uid, !joined) }}
-          title={!canJoin ? '63A interlock boxes can\'t be joined' : joined ? 'Joined into one assembly. Click to keep them separate.' : 'Separate boxes. Click to join them.'}
-          style={{ position: 'absolute', top: '50%', left: 0, transform: 'translate(-50%, -50%)', whiteSpace: 'nowrap', padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, fontFamily: 'inherit', cursor: canJoin ? 'pointer' : 'default', border: `1.5px solid ${joined ? 'var(--brand)' : 'var(--border-strong)'}`, background: joined ? 'var(--brand)' : 'var(--surface)', color: joined ? '#fff' : 'var(--text-3)', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}
+          title={!canJoin ? "63A interlock boxes can't be joined" : joined ? 'Joined into one assembly. Click to keep them separate.' : 'Separate boxes. Click to join them.'}
+          style={{ position: 'absolute', top: -9, left: 0, transform: 'translateX(-50%)', whiteSpace: 'nowrap', padding: '2px 7px', borderRadius: 99, fontSize: 10, fontWeight: 700, fontFamily: 'inherit', cursor: canJoin ? 'pointer' : 'default', border: `1.5px solid ${joined ? 'var(--brand)' : 'var(--border-strong)'}`, background: joined ? 'var(--brand)' : 'var(--surface)', color: joined ? '#fff' : 'var(--text-3)', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}
         >
           {joined ? '⛓ Joined' : canJoin ? 'Separate' : '—'}
         </button>
       </div>
     )
   }
+
+  // ── Drawing a box like the real thing ──
+  // RAL 7035 grey body, screw caps in the corners, the smoked window with the DIN
+  // rail on top, and the socket compartments below. Sizes are to scale.
+  const PX_PER_MM = 0.6
+
+  const movingFit = (() => {
+    if (!moving) return null
+    const { product } = productOf(moving)
+    return product && !isBox(product) ? fitOf(product) : null
+  })()
 
   const renderBox = (box: DesignBox) => {
     const p = productsById[box.productId]
@@ -389,125 +482,213 @@ export default function TopterDesigner({
         </div>
       )
     }
-    const items = box.items.map((i) => ({ item: i, product: productsById[i.productId] })).filter((x): x is { item: typeof x.item; product: Product } => !!x.product)
-    const layout = boxLayout(p, items.map((x) => ({ product: x.product, qty: x.item.qty })))
-    const [wMm] = boxSizeMm(p)
-    const width = Math.round(Math.max(150, Math.min(290, 110 + wMm * 0.36)))
+    const shape: BoxShape = boxShape(p)
+    const seats = allSeats(shape, box.items, productsById)
+    const occ = occupancy(seats, box.items, productsById)
+    const itemsByUid = Object.fromEntries(box.items.map((i) => [i.uid, i])) as Record<string, DesignItem>
+    const din = dinSpace(shape, box.items, productsById)
+    const cover = box.items.find((i) => i.seat === 'top')
+    const dinItems = box.items.filter((i) => i.seat === 'din')
+    const extras = box.items.filter((i) => !i.seat || (i.seat !== 'din' && i.seat !== 'top' && !seats.some((s) => s.id === i.seat)))
+    const W = Math.round(Math.max(96, shape.wMm * PX_PER_MM))
+    const H = Math.round(Math.max(96, shape.hMm * PX_PER_MM))
+    const hasCols = shape.columns.length > 0
+    const topH = hasCols ? Math.round(Math.min(96, Math.max(42, H * 0.25))) : undefined
 
-    // Tiles: each socket / flange takes its tiles, in order
-    const tileFill: Product[] = []
-    items.forEach(({ product, item }) => { const n = tilesUsed(product) * Math.ceil(item.qty); for (let k = 0; k < n; k++) tileFill.push(product) })
-    const tileCount = Math.max(layout.tiles, tileFill.length)
-    // DIN rail: each device takes its modules
-    const dinFill: { product: Product; width: number }[] = []
-    items.forEach(({ product, item }) => { const w = dinUsed(product); if (w > 0) for (let k = 0; k < Math.ceil(item.qty); k++) dinFill.push({ product, width: w * (item.qty < 1 ? item.qty : 1) }) })
-    const dinUsedTotal = dinFill.reduce((n, d) => n + d.width, 0)
-    const dinCount = Math.max(layout.din, Math.ceil(dinUsedTotal))
-    const others = items.filter(({ product }) => placeOf(product) === 'other')
-
-    // This box's own capacity check
+    // This box's own capacity check (65x83 / 88x100 limits and so on)
     const localQty: QuantityMap = { [p.id]: 1 }
-    items.forEach(({ product, item }) => { localQty[product.id] = (localQty[product.id] ?? 0) + item.qty })
-    const localProducts = [p, ...items.map((x) => x.product).filter((x, i, a) => x.id !== p.id && a.indexOf(x) === i)]
+    box.items.forEach((it) => { localQty[it.productId] = (localQty[it.productId] ?? 0) + it.qty })
+    const localProducts = [p, ...box.items.map((i) => productsById[i.productId]).filter((x): x is Product => !!x && x.id !== p.id)].filter((x, i, a) => a.indexOf(x) === i)
     const over = capacityUsage(localProducts, localQty).filter((l) => l.over)
 
-    const key = `box:${box.uid}`
-    const hot = overSpot === key
-    const takes = movingIntoBox
+    const boxKey = `box:${box.uid}`
     const isDragged = dragging?.kind === 'box' && dragging.uid === box.uid
 
-    return (
-      <div
-        {...target(key, (pl) => dropOnBox(pl, box.uid))}
-        style={{ width, flexShrink: 0, position: 'relative', background: 'var(--surface)', border: `2px solid ${hot ? 'var(--brand)' : over.length > 0 ? 'var(--danger)' : 'var(--border-strong)'}`, borderRadius: 12, boxShadow: hot ? '0 0 0 4px var(--brand-light)' : '0 2px 6px rgba(0,0,0,0.08)', opacity: isDragged ? 0.45 : 1, cursor: picked && takes ? 'copy' : undefined, transition: 'box-shadow 0.12s' }}
-      >
-        {/* Handle: drag the box by its top bar */}
-        <div
+    // An empty seat: shows where the part being moved can go
+    const emptySeat = (seat: Seat) => {
+      const key = `seat:${box.uid}:${seat.id}`
+      const ok = !!movingFit && !!spanAt(seats, occ, seat, movingFit)
+      const hot = overSpot === key
+      const tall = seat.kind === 'switched' || seat.kind === 'seat115' || seat.kind === 'col63'
+      return (
+        <div key={seat.id} {...target(key, (pl) => dropInto(pl, box.uid, [seat.id]))}
+          title={SEAT_NAMES[seat.kind]}
+          style={{ flex: 1, minHeight: 0, minWidth: 0, borderRadius: seat.kind === 'domo' ? 2 : 5, border: `1.5px dashed ${hot ? 'var(--brand)' : ok ? '#3d8b40' : 'rgba(0,0,0,0.22)'}`, background: hot ? 'rgba(0,86,179,0.15)' : ok ? 'rgba(61,139,64,0.12)' : tall ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? '#3d8b40' : 'rgba(0,0,0,0.25)', fontSize: 14, fontWeight: 700, cursor: picked ? 'copy' : undefined }}>
+          {ok ? '+' : ''}
+        </div>
+      )
+    }
+
+    // What sits on a part: its own seats, laid out like the real flange or cap
+    const childSeats = (item: DesignItem, part: Product) => {
+      const kids = partSeats(part, item.uid)
+      if (kids.length === 0) return null
+      const kidOcc = kids.map((s) => renderSeatContent(s))
+      if (kids[0].kind === 'f63') {
+        // 63A flange: the socket sits low down; the space above it is blocked
+        return (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3, minHeight: 0 }}>
+            <div style={{ flex: 0.75, borderRadius: 3, background: 'repeating-linear-gradient(135deg, rgba(0,0,0,0.05) 0 4px, transparent 4px 8px)' }} title="Blocked by the 63A flange" />
+            <div style={{ flex: 1.25, display: 'flex', minHeight: 0 }}>{kidOcc[0]}</div>
+          </div>
+        )
+      }
+      const row = kids[0].kind === 'domo'
+      return <div style={{ flex: 1, display: 'flex', flexDirection: row ? 'row' : 'column', gap: 3, minHeight: 0, minWidth: 0, padding: row ? '18% 8%' : 0 }}>{kidOcc}</div>
+    }
+
+    // A seat with whatever sits in it
+    const renderSeatContent = (seat: Seat): JSX.Element | null => {
+      const uid = occ[seat.id]
+      if (!uid) return emptySeat(seat)
+      const item = itemsByUid[uid]
+      if (!item || item.seat !== seat.id) return null   // the rest of a spanning part
+      const part = productsById[item.productId]
+      if (!part) return emptySeat(seat)
+      const span = fitOf(part).span
+      const isSel = selected === item.uid
+      const key = `item:${item.uid}`
+      return (
+        <div key={seat.id}
           draggable
-          onDragStart={(e) => startDrag(e, { kind: 'box', uid: box.uid })}
+          onDragStart={(e) => { e.stopPropagation(); startDrag(e, { kind: 'item', boxUid: box.uid, itemUid: item.uid }) }}
           onDragEnd={endDrag}
+          {...target(key, (pl) => { const free = partSeats(part, item.uid).map((s) => s.id); if (free.length > 0) dropInto(pl, box.uid, free); else showToast('That place is taken. Remove what is there first.', 'error') })}
+          onClick={(e) => { e.stopPropagation(); if (picked) { const free = partSeats(part, item.uid).map((s) => s.id); if (free.length > 0) dropInto(picked, box.uid, free); return } setSelected(isSel ? null : item.uid) }}
+          title={`${part.part_number ?? ''} ${part.description}`}
+          style={{ flex: span, position: 'relative', minHeight: 0, minWidth: 0, display: 'flex', cursor: 'grab', outline: isSel ? '2px solid var(--brand)' : overSpot === key ? '2px dashed var(--brand)' : 'none', outlineOffset: 1, borderRadius: 4, opacity: dragging?.kind === 'item' && dragging.itemUid === item.uid ? 0.4 : 1 }}>
+          <PartDrawing part={part}>{childSeats(item, part)}</PartDrawing>
+          {isSel && (
+            <button type="button" aria-label="Remove" title="Remove (and what sits on it)" onClick={(e) => { e.stopPropagation(); removeItem(box.uid, item.uid) }}
+              style={{ position: 'absolute', top: -7, right: -7, width: 20, height: 20, borderRadius: 99, border: 'none', background: 'var(--danger)', color: '#fff', fontSize: 13, lineHeight: '20px', cursor: 'pointer', zIndex: 5, padding: 0 }}>×</button>
+          )}
+        </div>
+      )
+    }
+
+    // The window with the DIN rail: devices left to right, blank covers after
+    const renderWindow = () => {
+      const units: { item: DesignItem; part: Product; width: number }[] = []
+      dinItems.forEach((it) => {
+        const part = productsById[it.productId]
+        if (!part) return
+        const w = readCapacity(part.capacity).uses?.din ?? 0
+        const whole = Math.floor(it.qty)
+        for (let k = 0; k < whole; k++) units.push({ item: it, part, width: w })
+        const frac = round2(it.qty - whole)
+        if (frac > 0) units.push({ item: it, part, width: w * frac })
+      })
+      const total = Math.max(din.total, din.used)
+      const modPx = (W - 16 - 16) / Math.max(1, total)   // width of one module on screen
+      const key = `din:${box.uid}`
+      const ok = movingFit?.kind === 'din'
+      return (
+        <div {...target(key, (pl) => dropInto(pl, box.uid, null))}
+          title={`DIN rail: ${din.used} of ${din.total} modules used`}
+          style={{ height: topH, flex: hasCols ? undefined : 1, position: 'relative', borderRadius: 6, border: `2px solid ${overSpot === key ? 'var(--brand)' : ok ? '#3d8b40' : '#9a9b96'}`, background: 'linear-gradient(170deg, rgba(150,166,180,0.6), rgba(52,63,76,0.82))', overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 6px' }}>
+          <div style={{ position: 'absolute', left: 4, right: 4, top: '50%', height: 5, transform: 'translateY(-50%)', background: 'linear-gradient(#e2e5e8, #9ea4aa)', borderRadius: 1 }} />
+          <div style={{ position: 'relative', display: 'flex', width: '100%', height: '64%', maxHeight: 46 }}>
+            {units.map((u, i) => {
+              const start = units.slice(0, i).reduce((n, x) => n + x.width, 0)
+              const bad = start + u.width > din.total + 0.001
+              const label = dinLabel(u.part)
+              const blank = label === '' && /cover|blank/i.test(u.part.description)
+              return (
+                <div key={i}
+                  draggable onDragStart={(e) => { e.stopPropagation(); startDrag(e, { kind: 'item', boxUid: box.uid, itemUid: u.item.uid }) }} onDragEnd={endDrag}
+                  onClick={(e) => { e.stopPropagation(); setSelected(selected === u.item.uid ? null : u.item.uid) }}
+                  title={`${u.part.part_number ?? ''} ${u.part.description}`}
+                  style={{ width: `${(u.width / total) * 100}%`, flexShrink: 0, background: bad ? '#f3c4c4' : blank ? '#e6e6e2' : '#fbfbf8', border: `1px solid ${bad ? 'var(--danger)' : '#8f908b'}`, borderRadius: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0 2px', overflow: 'hidden', cursor: 'grab', outline: selected === u.item.uid ? '2px solid var(--brand)' : 'none' }}>
+                  {!blank && <div style={{ width: '42%', minWidth: 3, height: '34%', background: /rcbo|rccb|rcd/i.test(u.part.description) ? '#1d4f91' : '#2b2e33', borderRadius: 1 }} />}
+                  {!blank && <div style={{ fontSize: 7, fontWeight: 700, color: '#333', whiteSpace: 'nowrap', lineHeight: 1 }}>{u.width * modPx >= 18 ? label : ''}</div>}
+                </div>
+              )
+            })}
+            {din.total - din.used > 0.001 && (
+              <div style={{ flex: 1, borderRadius: 2, background: `repeating-linear-gradient(90deg, #dcdcd7 0 calc(100% / ${Math.max(1, Math.round(din.total - din.used))} - 1px), #b9bab4 calc(100% / ${Math.max(1, Math.round(din.total - din.used))} - 1px) calc(100% / ${Math.max(1, Math.round(din.total - din.used))}))`, opacity: 0.85 }} title="Free modules (module covers)" />
+            )}
+          </div>
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(115deg, rgba(255,255,255,0.32) 0 16%, rgba(255,255,255,0) 30%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', bottom: 2, left: '50%', transform: 'translateX(-50%)', width: 14, height: 4, borderRadius: 2, background: '#7d7e79', pointerEvents: 'none' }} />
+        </div>
+      )
+    }
+
+    const renderBlind = () => {
+      const key = `seat:${box.uid}:top`
+      const ok = movingFit?.kind === 'top'
+      return (
+        <div {...target(key, (pl) => dropInto(pl, box.uid, ['top']))}
+          title="Blind cover. Drop a window cover with DIN rail here (P579451 / P579452 / P579453)."
+          style={{ height: topH, borderRadius: 6, background: 'linear-gradient(#d4d5d0, #c6c7c2)', border: `2px ${ok ? 'dashed #3d8b40' : 'solid #a9aaa4'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: ok ? '#3d8b40' : '#7a7b76', fontWeight: 600, textAlign: 'center', padding: 4 }}>
+          {ok ? '+ Window cover' : 'Blind cover'}
+        </div>
+      )
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: W, flexShrink: 0, opacity: isDragged ? 0.45 : 1 }}>
+        <div {...target(boxKey, (pl) => dropInto(pl, box.uid, null))}
+          data-box={p.part_number ?? ''}
+          onClick={(e) => { if (picked) { e.stopPropagation(); dropInto(picked, box.uid, null) } else setSelected(null) }}
+          style={{ position: 'relative', width: W, height: H, borderRadius: 10, background: 'linear-gradient(180deg, #ededea, #d6d7d2)', border: `1px solid ${overSpot === boxKey ? 'var(--brand)' : over.length > 0 ? 'var(--danger)' : '#a6a7a1'}`, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -2px 0 rgba(0,0,0,0.06), 0 4px 10px rgba(0,0,0,0.18)${overSpot === boxKey ? ', 0 0 0 3px var(--brand-light)' : ''}`, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, cursor: picked ? 'copy' : undefined }}>
+          {[[5, 5], [5, null], [null, 5], [null, null]].map(([t, l], i) => (
+            <span key={i} aria-hidden style={{ position: 'absolute', width: 7, height: 7, borderRadius: 99, background: 'radial-gradient(circle at 35% 35%, #f6f6f3, #bdbeb9)', border: '1px solid #a3a49e', top: t ?? undefined, bottom: t == null ? 5 : undefined, left: l ?? undefined, right: l == null ? 5 : undefined }} />
+          ))}
+          {shape.top === 'window' || cover ? renderWindow() : shape.top === 'blind' ? renderBlind() : null}
+          {hasCols && (
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${shape.columns.length}, 1fr)`, gap: 5 }}>
+              {shape.columns.map((col, c) => {
+                const colSeats = seats.filter((s) => s.parent === null && s.id.startsWith(`c${c}`) && (s.id === `c${c}` || s.id.startsWith(`c${c}r`)))
+                return (
+                  <div key={c} style={{ minHeight: 0, minWidth: 0, borderRadius: 6, background: '#c3c4bf', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.28)', padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {col.kind === 'col63' && <div style={{ flex: 0.9, borderRadius: 4, background: '#e9e9e6', border: '1px solid #b0b1ab' }} title="Blocked by the 63A socket below" />}
+                    {colSeats.map((s) => <div key={s.id} style={{ flex: col.kind === 'col63' ? 1.1 : 1, display: 'flex', minHeight: 0 }}>{renderSeatContent(s)}</div>)}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {!hasCols && shape.top === 'none' && <div style={{ flex: 1, borderRadius: 6, background: '#c3c4bf', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.28)' }} />}
+        </div>
+
+        {/* Name and the parts list (tap a part to remove it, change DIN amounts) */}
+        <div draggable onDragStart={(e) => startDrag(e, { kind: 'box', uid: box.uid })} onDragEnd={endDrag}
           title="Drag to move this box"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', background: 'var(--surface-3)', borderRadius: '10px 10px 0 0', cursor: 'grab', borderBottom: '1px solid var(--border)' }}
-        >
-          <span aria-hidden style={{ color: 'var(--text-3)', fontSize: 12, letterSpacing: -2 }}>⋮⋮</span>
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'grab' }}>
+          <span aria-hidden style={{ color: 'var(--text-3)', fontSize: 12, letterSpacing: -2, marginTop: 1 }}>⋮⋮</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="part-number" style={{ fontSize: 11 }}>{p.part_number}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={p.description}>{shortName(p)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.25 }} title={p.description}>{shortName(p)}</div>
           </div>
           <button type="button" aria-label="Remove this box" title="Remove this box and its parts" onClick={(e) => { e.stopPropagation(); removeBox(box.uid) }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-3)', fontSize: 16, lineHeight: 1, padding: 2 }}>×</button>
         </div>
-
-        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {tileCount > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(tileCount, Math.max(1, Math.floor((width - 16) / 50)))}, 1fr)`, gap: 4 }}>
-              {Array.from({ length: tileCount }).map((_, i) => {
-                const fill = tileFill[i]
-                const extra = i >= layout.tiles
-                const url = fill ? pictureUrl(fill.image_url) : null
-                return (
-                  <div key={i} title={fill ? `${fill.part_number ?? ''} ${fill.description}` : 'Free socket position'} style={{ aspectRatio: '1', borderRadius: 6, border: `1.5px ${fill ? 'solid' : 'dashed'} ${extra ? 'var(--danger)' : fill ? 'var(--brand)' : 'var(--border-strong)'}`, background: extra ? 'var(--danger-bg)' : fill ? '#fff' : 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--text-2)', textAlign: 'center', padding: 2 }}>
-                    {fill ? (url ? <img src={url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : (fill.part_number ?? '•')) : ''}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {dinCount > 0 && (
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 2 }}>DIN rail · {round2(dinUsedTotal)} / {layout.din} modules</div>
-              <div style={{ display: 'flex', height: 26, border: '1px solid var(--border-strong)', borderRadius: 4, overflow: 'hidden', background: 'repeating-linear-gradient(90deg, var(--surface-2) 0 calc(100% / ' + dinCount + ' - 1px), var(--border) calc(100% / ' + dinCount + ' - 1px) calc(100% / ' + dinCount + '))' }}>
-                {dinFill.map((d, i) => {
-                  const startAt = dinFill.slice(0, i).reduce((n, x) => n + x.width, 0)
-                  const extra = startAt + d.width > layout.din
-                  return (
-                    <div key={i} title={`${d.product.part_number ?? ''} ${d.product.description}`} style={{ width: `${(d.width / dinCount) * 100}%`, flexShrink: 0, background: extra ? 'var(--danger)' : 'var(--brand)', borderRight: '1px solid #fff', color: '#fff', fontSize: 8, fontFamily: 'var(--mono)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                      {d.width >= 2 ? (d.product.part_number ?? '').replace(/^[PB]/, '') : ''}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {tileCount === 0 && dinCount === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '10px 4px', textAlign: 'center', border: '1.5px dashed var(--border-strong)', borderRadius: 6 }}>Drop parts here</div>
-          )}
-
-          {others.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {others.map(({ product, item }) => (
-                <span key={item.uid} title={product.description} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: 'var(--surface-3)', color: 'var(--text-2)', fontFamily: 'var(--mono)' }}>{item.qty}× {product.part_number}</span>
-              ))}
-            </div>
-          )}
-
-          {/* Parts in this box: drag to another box, or change the amount */}
-          {items.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
-              {items.map(({ item, product }) => {
-                const step = qtyStep(product)
-                return (
-                  <div key={item.uid} draggable onDragStart={(e) => { e.stopPropagation(); startDrag(e, { kind: 'item', boxUid: box.uid, itemUid: item.uid }) }} onDragEnd={endDrag}
-                    title={`${product.description} · drag to another box`}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'grab' }}>
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{item.qty}×</span> {product.part_number} <span style={{ color: 'var(--text-3)' }}>{shortName(product)}</span>
-                    </span>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ height: 20, padding: '0 5px' }} aria-label="One fewer" onClick={(e) => { e.stopPropagation(); setItemQty(box.uid, item.uid, round2(item.qty - step)) }}>−</button>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ height: 20, padding: '0 5px' }} aria-label="One more" onClick={(e) => { e.stopPropagation(); setItemQty(box.uid, item.uid, round2(item.qty + step)) }}>+</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {over.length > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 500 }}>
-              {over.map((l) => <div key={l.key}>⚠ {l.label}: {l.used} / {l.provided}</div>)}
-            </div>
-          )}
-        </div>
+        {box.items.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {[...box.items].sort((a, b) => Number(a.seat === 'din') - Number(b.seat === 'din')).map((it) => {
+              const part = productsById[it.productId]
+              if (!part) return null
+              const adjustable = it.seat === 'din' || !it.seat
+              const step = qtyStep(part)
+              return (
+                <div key={it.uid} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: 'var(--text-2)', background: selected === it.uid ? 'var(--brand-light)' : undefined, borderRadius: 4 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={part.description}>
+                    <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--text-1)' }}>{it.qty}×</span> {part.part_number} {shortName(part)}
+                  </span>
+                  {adjustable && <button type="button" className="btn btn-ghost btn-sm" style={{ height: 18, padding: '0 4px' }} aria-label="One fewer" onClick={() => setItemQty(box.uid, it.uid, round2(it.qty - step))}>−</button>}
+                  {adjustable && <button type="button" className="btn btn-ghost btn-sm" style={{ height: 18, padding: '0 4px' }} aria-label="One more" onClick={() => setItemQty(box.uid, it.uid, round2(it.qty + step))}>+</button>}
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ height: 18, padding: '0 4px', color: 'var(--text-3)' }} aria-label="Remove" onClick={() => removeItem(box.uid, it.uid)}>×</button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {extras.length > 0 && <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>{extras.length} part{extras.length !== 1 ? 's' : ''} with this box, not in a position</div>}
+        {over.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 500 }}>
+            {over.map((l) => <div key={l.key}>⚠ {l.label}: {l.used} / {l.provided}</div>)}
+          </div>
+        )}
       </div>
     )
   }
@@ -518,7 +699,7 @@ export default function TopterDesigner({
     return (
       <div key={row.id} style={{ marginBottom: 14 }}>
         <div style={{ ...titleStyle, fontSize: 11, marginBottom: 6 }}>Row {rowIdx + 1} · {label}</div>
-        <div style={{ display: 'flex', alignItems: 'stretch', overflowX: 'auto', padding: '4px 4px 10px', userSelect: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', overflowX: 'auto', padding: '14px 4px 10px', userSelect: 'none' }}>
           {renderGap(row.id, 0, false)}
           {row.boxes.map((box, i) => (
             <div key={box.uid} style={{ display: 'flex', alignItems: 'stretch' }}>
@@ -547,7 +728,7 @@ export default function TopterDesigner({
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: 19 }}>Box designer</h2>
         <p style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 3 }}>
-          Drag a box onto the wall, then drag sockets, flanges and DIN devices into it. Put boxes side by side to join them into one assembly, or start a new row for a separate box. On a phone, tap a part and then tap where it goes.
+          Drag a box onto the wall, then drag parts into it. Each part only goes where it really fits: fixed sockets in socket positions, interlocked sockets and 103x230 flanges in the switched-socket holes, sockets onto flanges and caps, and DIN devices onto the rail behind the window. Green outlines show where the part you're holding can go. Put boxes side by side to join them, or start a new row for a separate box. On a phone, tap a part and then tap where it goes. Tap a placed part to remove it.
         </p>
       </div>
 
@@ -721,6 +902,106 @@ export default function TopterDesigner({
   )
 }
 
+
+// ── Part drawings ─────────────────────────────────────────────
+// Simple to-scale-ish pictures of each kind of part, in IEC voltage colours.
+
+const SEAT_NAMES: Record<string, string> = {
+  fixed: 'Socket position (65x83 / 88x100)',
+  col63: '63A socket position (takes 2 positions)',
+  switched: 'Switched-socket seat (103x230)',
+  seat115: '63A series seat (115x290)',
+  int50: '50x50 socket',
+  domo: 'domoTER module',
+  f63: '63A socket on the flange',
+  top: 'Blind cover',
+}
+
+const svgFill = { width: '100%', height: '100%', display: 'block' } as const
+
+// A plain grey flange plate with its 4 screws
+function Plate({ children, label }: { children?: React.ReactNode; label?: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', borderRadius: 4, background: 'linear-gradient(#f2f2ef, #e2e2de)', border: '1px solid #a5a6a0', padding: '7% 8%', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {[[2, 2], [2, null], [null, 2], [null, null]].map(([t, l], i) => (
+        <span key={i} aria-hidden style={{ position: 'absolute', width: 3, height: 3, borderRadius: 99, background: '#9c9d97', top: t ?? undefined, bottom: t == null ? 2 : undefined, left: l ?? undefined, right: l == null ? 2 : undefined }} />
+      ))}
+      {children}
+      {label && <span style={{ margin: 'auto', fontSize: 8, color: '#8a8b86', fontWeight: 600 }}>{label}</span>}
+    </div>
+  )
+}
+
+function FixedSocketSvg({ colour, amps, big }: { colour: string; amps: string; big?: boolean }) {
+  const r = big ? 40 : 33
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style={svgFill} aria-hidden>
+      <rect x="3" y="3" width="94" height="94" rx="9" fill="#f2f2ef" stroke="#a5a6a0" strokeWidth="2" />
+      <rect x={50 - r * 0.55} y={54 - r - 7} width={r * 1.1} height="9" rx="3" fill={colour} />
+      <circle cx="50" cy="55" r={r} fill={colour} stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+      <circle cx="50" cy="55" r={r * 0.72} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="2" />
+      <text x="50" y="61" textAnchor="middle" fontSize={big ? 20 : 17} fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">{amps ? `${amps}A` : ''}</text>
+    </svg>
+  )
+}
+
+function InterlockedSvg({ colour, amps }: { colour: string; amps: string }) {
+  return (
+    <svg viewBox="0 0 100 210" preserveAspectRatio="xMidYMid meet" style={svgFill} aria-hidden>
+      <rect x="3" y="3" width="94" height="204" rx="10" fill="#f3f3f0" stroke="#a5a6a0" strokeWidth="2" />
+      <rect x="28" y="16" width="44" height="9" rx="3" fill={colour} />
+      <circle cx="50" cy="64" r="36" fill={colour} stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+      <text x="50" y="71" textAnchor="middle" fontSize="18" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">{amps ? `${amps}A` : ''}</text>
+      <circle cx="50" cy="152" r="30" fill="#3a3d42" stroke="#24262a" strokeWidth="2" />
+      <rect x="43" y="118" width="14" height="68" rx="7" fill="#c62828" transform="rotate(-35 50 152)" />
+      <circle cx="50" cy="152" r="7" fill="#24262a" />
+    </svg>
+  )
+}
+
+function DomesticSvg({ colour }: { colour: string }) {
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style={svgFill} aria-hidden>
+      <rect x="6" y="6" width="88" height="88" rx="8" fill={colour} stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+      <circle cx="50" cy="50" r="28" fill="rgba(0,0,0,0.55)" />
+      <circle cx="40" cy="50" r="5" fill="#ddd" /><circle cx="60" cy="50" r="5" fill="#ddd" />
+    </svg>
+  )
+}
+
+function DomoModuleSvg() {
+  return (
+    <svg viewBox="0 0 45 70" preserveAspectRatio="none" style={svgFill} aria-hidden>
+      <rect x="1" y="1" width="43" height="68" rx="3" fill="#fbfbf9" stroke="#9a9a96" strokeWidth="1.5" />
+      <circle cx="22.5" cy="35" r="10" fill="#d9d9d5" stroke="#9a9a96" />
+    </svg>
+  )
+}
+
+// One part, drawn by what it is. children = the seats it offers (flanges, caps)
+function PartDrawing({ part, children }: { part: Product; children: React.ReactNode }) {
+  const colour = voltColour(part)
+  const amps = ampsOf(part)
+  const d = part.description
+  const prov = readCapacity(part.capacity).provides ?? {}
+  if (part.category === 'Interlocked sockets') return <InterlockedSvg colour={colour} amps={amps} />
+  if (part.category === 'Fixed sockets') return <FixedSocketSvg colour={colour} amps={amps} big={amps === '63'} />
+  if (prov.domo) {
+    // domoTER cap: smoked lid over 2 module spaces
+    return (
+      <div style={{ flex: 1, minWidth: 0, borderRadius: 5, background: 'linear-gradient(170deg, #9aa3ab, #59626b)', border: '1px solid #4a5158', display: 'flex', position: 'relative' }}>
+        {children}
+      </div>
+    )
+  }
+  if (readCapacity(part.capacity).uses?.domo) return <DomoModuleSvg />
+  if (readCapacity(part.capacity).uses?.int50 || /50x50/i.test(d) && part.category === 'Domestic sockets') return <DomesticSvg colour={/BS1363|United Kingdom/i.test(d) ? '#f4f4f1' : '#1c62c4'} />
+  if (part.category === 'Domestic sockets') return <DomesticSvg colour="#f4f4f1" />
+  if (/closing flange/i.test(d)) return <Plate label="Closing" />
+  if (/extra low voltage/i.test(d)) return <Plate><svg viewBox="0 0 100 100" style={svgFill} aria-hidden><circle cx="50" cy="50" r="28" fill="none" stroke="#7b3fb8" strokeWidth="6" /></svg></Plate>
+  if (/adapter/i.test(d)) return <Plate>{children}</Plate>
+  return <Plate label={children ? undefined : (part.part_number ?? '')}>{children}</Plate>
+}
 
 // ── TopTer: simple list, step-by-step or the box designer ──
 export type TopterMode = 'list' | 'steps' | 'designer'
