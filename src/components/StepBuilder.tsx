@@ -42,6 +42,8 @@ interface Props {
   extraCosts: ExtraCostMap
   onSetExtraCost: (extraId: string, value: string) => void
   onClearExtras: () => void
+  onClearQuote: () => void   // clears the whole quote back to the section's defaults
+  canClear: boolean
   extrasResult: ExtrasResult
   buildContext: BuildContext
   setBuildContext: (ctx: BuildContext) => void
@@ -174,7 +176,7 @@ export default function StepBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext, setBuildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearQuote, canClear, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
@@ -288,11 +290,6 @@ export default function StepBuilder({
     : sectionIdx < SECTIONS.length - 1 ? `Next: ${SECTIONS[sectionIdx + 1].label}` : ''
 
   // ── Actions ──
-  const handleClear = () => {
-    if (activeCount === 0 && selectedExtras.size === 0) return
-    if (confirm('Clear all quantities and extras?')) { products.forEach((p) => setQty(p.id, 0)); onClearExtras() }
-  }
-
   const handleSave = async (asNew = false) => {
     if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
     if (!quoteForm.project_name.trim()) { showToast('Project name is required', 'error'); return }
@@ -635,7 +632,7 @@ export default function StepBuilder({
           {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
         </div>
         <div className="total-bar-actions">
-          {(activeCount > 0 || selectedExtras.size > 0) && <button className="btn btn-ghost hide-mobile" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
+          {canClear && <button className="btn btn-ghost hide-mobile" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={onClearQuote}>Clear</button>}
           {!isFirst && <button className="btn" style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }} onClick={back}>Back</button>}
           {!isLast && <button className="btn btn-secondary" onClick={next}>{nextLabel}</button>}
           {isLast && <button className="btn btn-secondary" onClick={() => handleSave()} disabled={saving}>{saving ? 'Saving…' : editingQuote ? 'Update quote' : 'Save quote'}</button>}

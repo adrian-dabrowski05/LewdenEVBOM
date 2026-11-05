@@ -37,6 +37,8 @@ interface Props {
   showToast: (msg: string, type?: 'success' | 'error') => void
   editingQuote: EditingQuote | null
   onCancelEdit: () => void
+  onClearQuote: () => void   // clears the whole quote back to the TopTer defaults
+  canClear: boolean
   onReview: () => void   // opens Review & save in the step builder
 }
 
@@ -75,7 +77,7 @@ const shortName = (p: Product) => p.option_label?.trim() || p.description
 
 export default function TopterDesigner({
   products, loading, quantities, setQty, design, setDesign,
-  quoteForm, settings, extrasResult, showToast, editingQuote, onCancelEdit, onReview,
+  quoteForm, settings, extrasResult, showToast, editingQuote, onCancelEdit, onClearQuote, canClear, onReview,
 }: Props) {
   const [tab, setTab] = useState('boxes')
   const [search, setSearch] = useState('')
@@ -280,10 +282,10 @@ export default function TopterDesigner({
     if (first && joined) setJoined(first.boxUid, true)
   }
 
-  const clearDesign = () => {
-    if (boxCount === 0) return
-    if (!confirm('Take every box off the designer? Their parts come off the quote too.')) return
-    commit({ rows: [] })
+  // Clear: the whole quote, not just the boxes (labour, uplift, carriage and
+  // quote details too), the same as Clear in the list and step builders
+  const clearQuote = () => {
+    onClearQuote()
     setAsks([])
   }
 
@@ -615,7 +617,7 @@ export default function TopterDesigner({
               <div style={titleStyle}>Wall</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-2)' }}>
                 {boxCount > 0 && <span>{boxCount} box{boxCount !== 1 ? 'es' : ''} · {assemblyCount} assembl{assemblyCount !== 1 ? 'ies' : 'y'}{joints > 0 ? ` · ${joints} joint${joints !== 1 ? 's' : ''}` : ''}</span>}
-                {boxCount > 0 && <button className="btn btn-ghost btn-sm" onClick={clearDesign}>Clear designer</button>}
+                {canClear && <button className="btn btn-ghost btn-sm" onClick={clearQuote}>Clear</button>}
               </div>
             </div>
 
