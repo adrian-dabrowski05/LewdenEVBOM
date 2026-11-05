@@ -400,6 +400,8 @@ function CapacityManager({ product, onRefresh, showToast }: { product: Product; 
   const initial = readCapacity(product.capacity)
   const [provides, setProvides] = useState<Record<string, string>>(() => toText(initial.provides))
   const [uses, setUses] = useState<Record<string, string>>(() => toText(initial.uses))
+  const initialStep = product.qty_step != null && product.qty_step > 0 && product.qty_step < 1 ? String(Number(product.qty_step)) : '1'
+  const [step, setStep] = useState(initialStep)
   const [saving, setSaving] = useState(false)
 
   const toMap = (m: Record<string, string>): CapacityMap | undefined => {
@@ -412,16 +414,22 @@ function CapacityManager({ product, onRefresh, showToast }: { product: Product; 
     const p = clear ? undefined : toMap(provides)
     const u = clear ? undefined : toMap(uses)
     const capacity = p || u ? { ...(p ? { provides: p } : {}), ...(u ? { uses: u } : {}) } : null
+    // Only send qty_step when it changed, so capacity still saves before topter-din-blanks.sql has been run
+    const stepChanged = clear ? initialStep !== '1' : step !== initialStep
+    const qty_step = clear || step === '1' ? null : Number(step)
     setSaving(true)
-    const { error } = await supabase.from('products').update({ capacity }).eq('id', product.id)
+    const { error } = await supabase.from('products').update(stepChanged ? { capacity, qty_step } : { capacity }).eq('id', product.id)
     setSaving(false)
-    if (error) { showToast(/capacity/.test(error.message) ? 'Run supabase/topter-section.sql in Supabase first' : `Could not save: ${error.message}`, 'error'); return }
-    if (clear) { setProvides({}); setUses({}) }
+    if (error) {
+      showToast(/qty_step/.test(error.message) ? 'Run supabase/topter-din-blanks.sql in Supabase first' : /capacity/.test(error.message) ? 'Run supabase/topter-section.sql in Supabase first' : `Could not save: ${error.message}`, 'error')
+      return
+    }
+    if (clear) { setProvides({}); setUses({}); setStep('1') }
     showToast(clear ? 'Capacity cleared' : 'Capacity saved'); onRefresh()
   }
 
   const numberBox = (value: string, onChange: (v: string) => void, label: string) => (
-    <input className="input input-sm" type="number" min="0" step="1" placeholder="—" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
+    <input className="input input-sm" type="number" min="0" step="0.5" placeholder="—" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
       style={{ width: 76, fontFamily: 'var(--mono)', textAlign: 'center' }} />
   )
 
@@ -446,6 +454,15 @@ function CapacityManager({ product, onRefresh, showToast }: { product: Product; 
           </div>
         ))}
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10, fontSize: 13, fontWeight: 500 }}>
+        Can be quoted in
+        <select className="input input-sm" style={{ width: 'auto' }} value={step} onChange={(e) => setStep(e.target.value)}>
+          <option value="1">Whole units only</option>
+          <option value="0.5">Halves (0.5)</option>
+          <option value="0.25">Quarters (0.25)</option>
+        </select>
+        <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400 }}>For parts that can be cut, like DIN blanks. Space used is counted per part, so a quarter of a 2-module blank fills half a module.</span>
+      </label>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
         <button className="btn btn-sm" onClick={() => save(true)} disabled={saving}>Clear</button>
         <button className="btn btn-sm btn-primary" onClick={() => save()} disabled={saving}>{saving ? 'Saving…' : 'Save capacity'}</button>

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import type { Product } from '../types'
-import { Stepper, fmt } from './QuoteBuilder'
+import { Stepper, fmt, qtyStep } from './QuoteBuilder'
 import { CapacityNote } from './CapacityPanel'
 import { PartThumb } from './PartPicture'
 import { useSectionConfig } from '../utils/sections'
@@ -70,7 +70,7 @@ function QuantityAndTotal({ p, props }: { p: Product; props: RangeListProps }) {
   const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-      <Stepper value={qty} onChange={(n) => props.setQty(p.id, n)} disabled={props.blockedOf(p)} />
+      <Stepper value={qty} onChange={(n) => props.setQty(p.id, n)} disabled={props.blockedOf(p)} step={qtyStep(p)} />
       <div className={onQuote > 0 ? undefined : 'hide-mobile'} style={{ minWidth: 72, textAlign: 'right', fontWeight: 600, fontSize: 14 }}>
         {lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>—</span>}
       </div>

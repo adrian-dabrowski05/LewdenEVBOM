@@ -11,7 +11,7 @@ import { toQuoteExtras } from '../utils/extras'
 import { quotePricing } from '../utils/pricing'
 import { capacityUsage } from '../utils/capacity'
 import type { EditingQuote } from '../App'
-import { Stepper, PresetsBar, ExtraRow, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
+import { Stepper, qtyStep, PresetsBar, ExtraRow, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
 import { PartThumb } from './PartPicture'
 import RangeList from './RangeList'
@@ -414,7 +414,7 @@ export default function TopterStepBuilder({
               {renderDetails(p)}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-              <Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} />
+              <Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} step={qtyStep(p)} />
               <div style={{ minWidth: 72, textAlign: 'right', fontWeight: 600, fontSize: 14 }}>
                 {lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>—</span>}
               </div>
