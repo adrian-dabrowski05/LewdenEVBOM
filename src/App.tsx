@@ -63,7 +63,7 @@ function useSectionState<T>(section: Section, sectionRef: MutableRefObject<Secti
   return [state[section], set]
 }
 
-// Which section was open last time (admin only, remembered on this device)
+// Which section was open last time (remembered on this device)
 function storedSection(): Section {
   try { return localStorage.getItem('quote_section') === 'topter' ? 'topter' : 'ev' } catch { return 'ev' }
 }
@@ -74,10 +74,9 @@ export default function App() {
   const [showAdminLogin, setShowAdminLogin] = useState(false)
 
   // ── Quoting section ─────────────────────────────────────────
-  // EV feeder pillars for everyone. Admins can switch to TopTer, which stays
-  // hidden from everyone else until it is finished. Signing out goes back to EV.
+  // EV feeder pillars or TopTer boxes, for everyone.
   const [section, setSection] = useState<Section>(storedSection)
-  const activeSection: Section = isAdmin ? section : 'ev'
+  const activeSection: Section = section
   const cfg = SECTIONS[activeSection]
   const sectionRef = useRef<Section>(activeSection)
   sectionRef.current = activeSection
@@ -630,7 +629,7 @@ export default function App() {
     <SectionContext.Provider value={cfg}>
       <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} subtitle={cfg.subtitle} />
       <main className="main">
-        {isAdmin && view !== 'requests' && <SectionSwitch section={activeSection} onChange={changeSection} />}
+        {view !== 'requests' && <SectionSwitch section={activeSection} onChange={changeSection} />}
         {view === 'builder' && activeSection === 'topter' && !productsLoading && products.length === 0 && (
           <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--text-2)', borderColor: 'var(--warning)' }}>
             No TopTer parts yet. Run <strong>supabase/topter-section.sql</strong> in the Supabase SQL Editor, then reload this page.
