@@ -9,11 +9,11 @@ import { readCapacity } from './capacity'
 // the quote, so the simple list, step builder, capacity check and totals all see it.
 
 // Joining parts for each joint between two boxes. Palazzoli catalogue 2023-2024,
-// p.85 "Use of accessories": one pair of stainless steel plates bridges the joint
-// and one Pg21 coupling fitting links the two boxes for the cables.
+// p.85 "Use of accessories". Adrian (2026-11-05): one pair of stainless steel
+// plates and two Pg21 coupling fittings per joint.
 export const JOIN_PARTS: { partNumber: string; perJoint: number; label: string }[] = [
   { partNumber: 'P579012', perJoint: 1, label: 'Pair of stainless steel joining plates' },
-  { partNumber: 'P580250', perJoint: 1, label: 'Pg21 coupling fitting' },
+  { partNumber: 'P580250', perJoint: 2, label: 'Pg21 coupling fittings' },
 ]
 
 export const EMPTY_DESIGN: TopterDesign = { rows: [] }
@@ -27,9 +27,11 @@ export function isBox(p: Product): boolean {
   return p.category === 'Enclosures' && !/^cover\b/i.test(p.description)
 }
 
-// Only distribution boards take the joining plates ("all topTER and PRIMA distribution boards")
+// Every box can be joined except the 63A switched (interlock) boxes (Adrian, 2026-11-05):
+// the 63A series boards and the 63A interlocked bottom boxes
+export const is63aInterlockBox = (p: Product) => /63A series|63A interlocked socket|\b1 63A socket/i.test(p.description)
 export function isJoinable(p: Product | undefined): boolean {
-  return !!p && /distribution board/i.test(p.description)
+  return !!p && isBox(p) && !is63aInterlockBox(p)
 }
 
 // Read an old or odd saved design safely
