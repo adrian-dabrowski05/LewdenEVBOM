@@ -13,6 +13,7 @@ import { capacityUsage } from '../utils/capacity'
 import type { EditingQuote } from '../App'
 import { Stepper, PresetsBar, ExtraRow, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
+import { PartThumb } from './PartPicture'
 import type { IncompatMap } from '../utils/compatibility'
 import { clashesFor } from '../utils/compatibility'
 
@@ -355,6 +356,7 @@ export default function TopterStepBuilder({
           {canMove && (
             <MoveButtons index={idx} count={group.length} disabled={reordering} onMove={(dir) => onMoveProduct(p.id, group.map((g) => g.id), dir)} />
           )}
+          <PartThumb product={p} size={56} />
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: qty > 0 ? 600 : 500 }}>{p.description}</div>

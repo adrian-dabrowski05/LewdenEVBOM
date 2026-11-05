@@ -66,6 +66,7 @@ export interface Product {
   is_active: boolean
   section?: Section | null
   capacity?: ProductCapacity | null
+  image_url?: string | null   // TopTer: picture shown next to the part (see utils/pictures.ts)
   created_at: string
   updated_at: string
 }

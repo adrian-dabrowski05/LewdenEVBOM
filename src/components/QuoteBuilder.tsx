@@ -8,6 +8,7 @@ import type {
 import { EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
+import { WithPicture } from './PartPicture'
 import { useSectionConfig } from '../utils/sections'
 import { capacityUsage } from '../utils/capacity'
 import { printQuote } from '../utils/printQuote'
@@ -1019,6 +1020,7 @@ export default function QuoteBuilder({
                           <tr key={p.id} style={blocked ? { background: 'var(--surface-3)', color: 'var(--text-3)' } : isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
                             {canMove && <td style={{ verticalAlign: 'middle' }}><MoveButtons {...moveProps(idx)} /></td>}
                             <td>
+                              <WithPicture product={p} size={44}>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
                               {cfg.usesCapacity && <CapacityNote product={p} />}
@@ -1027,6 +1029,7 @@ export default function QuoteBuilder({
                               {renderExtrasNote(p)}
                               {renderPrereqNote(p)}
                               {renderVariantDropdown(p)}
+                              </WithPicture>
                             </td>
                             <td>
                               {displayPN ? (
@@ -1063,6 +1066,7 @@ export default function QuoteBuilder({
                           </div>
                         )}
                         <div className="product-card-header">
+                          <WithPicture product={p} size={52}>
                           <div>
                             <div className="product-card-desc">{p.description}</div>
                             {displayPN && <span className="part-number" style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}>{displayPN}</span>}
@@ -1071,6 +1075,7 @@ export default function QuoteBuilder({
                             {renderAutoAddedNote(p)}
                             {renderExtrasNote(p)}
                           </div>
+                          </WithPicture>
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div>
                         </div>
                         {renderPrereqNote(p, true)}
