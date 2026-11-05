@@ -6,7 +6,7 @@ import { pictureUrl, similarPartsQuery, uploadPicture } from '../utils/pictures'
 
 type ShowToast = (msg: string, type?: 'success' | 'error') => void
 
-const SQL_HINT = 'Run supabase/topter-pictures.sql in Supabase first'
+const SQL_HINT = 'Run supabase/topter-pictures-ranges.sql in Supabase first'
 
 function explain(message: string): string {
   if (/image_url|bucket|row-level security|not found/i.test(message)) return SQL_HINT

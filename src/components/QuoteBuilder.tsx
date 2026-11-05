@@ -9,6 +9,7 @@ import { EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
 import { WithPicture } from './PartPicture'
+import RangeList from './RangeList'
 import { useSectionConfig } from '../utils/sections'
 import { capacityUsage } from '../utils/capacity'
 import { printQuote } from '../utils/printQuote'
@@ -693,7 +694,8 @@ export default function QuoteBuilder({
     return catalogue.filter((p) =>
       p.description.toLowerCase().includes(q) ||
       (p.part_number ?? '').toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q),
+      p.category.toLowerCase().includes(q) ||
+      (p.range_name ?? '').toLowerCase().includes(q),
     )
   }, [catalogue, search])
 
@@ -991,7 +993,30 @@ export default function QuoteBuilder({
               </span>
             </div>
 
-            {isOpen && (
+            {isOpen && cfg.usesRanges && !canMove && (
+              <RangeList
+                items={items}
+                all={products}
+                qtyOf={(id) => quantities[id] ?? 0}
+                onQuoteOf={(id) => finalQty[id] ?? 0}
+                setQty={setQty}
+                blockedOf={(p) => (finalQty[p.id] ?? 0) <= 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+                clashOf={(p) => (finalQty[p.id] ?? 0) > 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+                partNumberOf={(p) => getDisplayPartNumber(p, variantSelections[p.id] ? variantsById[variantSelections[p.id]] ?? null : null)}
+                renderDetails={(p) => (
+                  <>
+                    <IncompatNote clashIds={clashesFor(p.id, incompatMap, finalQty)} productsById={productsById} onQuote={(finalQty[p.id] ?? 0) > 0} />
+                    {renderAutoAddedNote(p)}
+                    {renderExtrasNote(p)}
+                    {renderPrereqNote(p, true)}
+                    {renderVariantDropdown(p, true)}
+                  </>
+                )}
+                openAll={searchActive}
+              />
+            )}
+
+            {isOpen && !(cfg.usesRanges && !canMove) && (
               <>
                 <div className="card" style={{ marginBottom: 4 }}>
                   <table className="product-table">

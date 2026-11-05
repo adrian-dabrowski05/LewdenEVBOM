@@ -20,6 +20,7 @@ export interface SectionConfig {
   usesBuildContext: boolean   // EV only: current rating / cabinet / size decide which extras apply
   usesCapacity: boolean       // TopTer only: boards provide socket and DIN space, parts use it
   usesPictures: boolean       // TopTer only: a picture next to each part (products.image_url)
+  usesRanges: boolean         // TopTer only: variants of one product are listed together under one card
 }
 
 export const SECTIONS: Record<Section, SectionConfig> = {
@@ -36,6 +37,7 @@ export const SECTIONS: Record<Section, SectionConfig> = {
     usesBuildContext: true,
     usesCapacity: false,
     usesPictures: false,
+    usesRanges: false,
   },
   topter: {
     key: 'topter',
@@ -50,6 +52,7 @@ export const SECTIONS: Record<Section, SectionConfig> = {
     usesBuildContext: false,
     usesCapacity: true,
     usesPictures: true,
+    usesRanges: true,
   },
 }
 

@@ -14,6 +14,7 @@ import type { EditingQuote } from '../App'
 import { Stepper, PresetsBar, ExtraRow, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
 import { PartThumb } from './PartPicture'
+import RangeList from './RangeList'
 import type { IncompatMap } from '../utils/compatibility'
 import { clashesFor } from '../utils/compatibility'
 
@@ -263,7 +264,7 @@ export default function TopterStepBuilder({
     const q = search.trim().toLowerCase()
     return stepItems.filter((p) => {
       if ((quantities[p.id] ?? 0) > 0) return true
-      if (q && !`${p.description} ${p.part_number ?? ''} ${p.notes ?? ''}`.toLowerCase().includes(q)) return false
+      if (q && !`${p.description} ${p.part_number ?? ''} ${p.notes ?? ''} ${p.range_name ?? ''}`.toLowerCase().includes(q)) return false
       // A filter only applies to parts it says something about (flanges have no current, etc.)
       return activeFilters.every((k) => { const v = READERS[k](p); return v == null || v === filters[k] })
     })
@@ -338,16 +339,60 @@ export default function TopterStepBuilder({
   // ── Pieces ──
   const canMove = reorderMode && !narrowing
 
+  const partNumberOf = (p: Product) => {
+    const selectedId = variantSelections[p.id] ?? ''
+    return getDisplayPartNumber(p, selectedId ? variantsById[selectedId] ?? null : null)
+  }
+
+  // Notes under a part: clashes, prerequisites, auto-added, extras, variant picker
+  const renderDetails = (p: Product) => {
+    const qty = quantities[p.id] ?? 0
+    const onQuote = finalQty[p.id] ?? 0
+    const pvs = variantsByProduct[p.id] ?? []
+    const selectedId = variantSelections[p.id] ?? ''
+    const autoParents = Object.keys(autoAdded[p.id] ?? {}).map((id) => productsById[id]?.description ?? 'another part')
+    const diff = extrasResult.delta[p.id]
+    const clashIds = clashesFor(p.id, incompatMap, finalQty)
+    return (
+      <>
+        <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
+        {qty > 0 && (prereqsByProduct[p.id]?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--success)', fontWeight: 500, maxWidth: 420 }}>
+            <span style={{ marginRight: 4 }}>✓</span>Auto-included:&nbsp;
+            {prereqsByProduct[p.id].map((pr, i) => {
+              const prereqProduct = productsById[pr.prerequisite_product_id]
+              const label = pr.note || `${prereqProduct?.description ?? 'Unknown'} ×${pr.quantity}`
+              return <span key={pr.id}>{i > 0 ? ', ' : ''}<strong>{label}</strong></span>
+            })}
+          </div>
+        )}
+        {autoParents.length > 0 && qty > 0 && (
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--success)', marginTop: 4 }}>✓ Auto-added via {autoParents.slice(0, 2).join(', ')}{autoParents.length > 2 ? ` +${autoParents.length - 2} more` : ''}</div>
+        )}
+        {diff ? (
+          <div style={{ fontSize: 11, fontWeight: 600, color: diff < 0 ? 'var(--danger)' : 'var(--brand)', marginTop: 4 }}>{diff < 0 ? diff : `+${diff}`} via extras · {onQuote} on quote</div>
+        ) : null}
+        {pvs.length > 0 && qty > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: selectedId ? 'var(--brand)' : 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              {selectedId ? 'Variant' : '⚠ Select variant'}
+            </label>
+            <select className="input input-sm" style={{ maxWidth: 280, borderColor: selectedId ? 'var(--brand)' : 'var(--danger)' }} value={selectedId} onChange={(e) => setVariantSelection(p.id, e.target.value)}>
+              <option value="">Select an option…</option>
+              {pvs.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  // Reorder mode: one card per part, as before ranges
   const renderPart = (p: Product, idx: number, group: Product[]) => {
     const qty = quantities[p.id] ?? 0
     const onQuote = finalQty[p.id] ?? 0
     const lineTotal = p.factory_cost != null && onQuote > 0 ? p.factory_cost * onQuote : null
-    const pvs = variantsByProduct[p.id] ?? []
-    const selectedId = variantSelections[p.id] ?? ''
-    const selectedVariant = selectedId ? variantsById[selectedId] : null
-    const displayPN = getDisplayPartNumber(p, selectedVariant ?? null)
-    const autoParents = Object.keys(autoAdded[p.id] ?? {}).map((id) => productsById[id]?.description ?? 'another part')
-    const diff = extrasResult.delta[p.id]
+    const displayPN = partNumberOf(p)
     const clashIds = clashesFor(p.id, incompatMap, finalQty)
     const blocked = clashIds.length > 0 && onQuote <= 0
     return (
@@ -366,23 +411,7 @@ export default function TopterStepBuilder({
               </div>
               <CapacityNote product={p} />
               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{p.notes}</div>}
-              <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
-              {qty > 0 && (prereqsByProduct[p.id]?.length ?? 0) > 0 && (
-                <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--success)', fontWeight: 500, maxWidth: 420 }}>
-                  <span style={{ marginRight: 4 }}>✓</span>Auto-included:&nbsp;
-                  {prereqsByProduct[p.id].map((pr, i) => {
-                    const prereqProduct = productsById[pr.prerequisite_product_id]
-                    const label = pr.note || `${prereqProduct?.description ?? 'Unknown'} ×${pr.quantity}`
-                    return <span key={pr.id}>{i > 0 ? ', ' : ''}<strong>{label}</strong></span>
-                  })}
-                </div>
-              )}
-              {autoParents.length > 0 && qty > 0 && (
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--success)', marginTop: 4 }}>✓ Auto-added via {autoParents.slice(0, 2).join(', ')}{autoParents.length > 2 ? ` +${autoParents.length - 2} more` : ''}</div>
-              )}
-              {diff ? (
-                <div style={{ fontSize: 11, fontWeight: 600, color: diff < 0 ? 'var(--danger)' : 'var(--brand)', marginTop: 4 }}>{diff < 0 ? diff : `+${diff}`} via extras · {onQuote} on quote</div>
-              ) : null}
+              {renderDetails(p)}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
               <Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} />
@@ -392,17 +421,6 @@ export default function TopterStepBuilder({
             </div>
           </div>
         </div>
-        {pvs.length > 0 && qty > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: selectedId ? 'var(--brand)' : 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              {selectedId ? 'Variant' : '⚠ Select variant'}
-            </label>
-            <select className="input input-sm" style={{ maxWidth: 280, borderColor: selectedId ? 'var(--brand)' : 'var(--danger)' }} value={selectedId} onChange={(e) => setVariantSelection(p.id, e.target.value)}>
-              <option value="">Select an option…</option>
-              {pvs.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-            </select>
-          </div>
-        )}
       </div>
     )
   }
@@ -410,7 +428,22 @@ export default function TopterStepBuilder({
   const renderParts = (items: Product[], emptyText: string) => (
     items.length === 0
       ? <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-3)' }}>{emptyText}</div>
-      : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map((p, idx) => renderPart(p, idx, items))}</div>
+      : canMove
+        ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map((p, idx) => renderPart(p, idx, items))}</div>
+        : (
+          <RangeList
+            items={items}
+            all={products}
+            qtyOf={(id) => quantities[id] ?? 0}
+            onQuoteOf={(id) => finalQty[id] ?? 0}
+            setQty={setQty}
+            blockedOf={(p) => (finalQty[p.id] ?? 0) <= 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+            clashOf={(p) => (finalQty[p.id] ?? 0) > 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+            partNumberOf={partNumberOf}
+            renderDetails={renderDetails}
+            openAll={narrowing}
+          />
+        )
   )
 
   const renderGroups = (groups: { label: string; items: Product[] }[], emptyText: string) => (
