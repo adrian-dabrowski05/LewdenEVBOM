@@ -66,6 +66,9 @@ export interface Product {
   is_active: boolean
   section?: Section | null
   capacity?: ProductCapacity | null
+  image_url?: string | null   // TopTer: picture shown next to the part (see utils/pictures.ts)
+  range_name?: string | null   // TopTer: parts that are variants of one product share a range (see utils/ranges.ts)
+  option_label?: string | null // TopTer: what tells this variant apart within its range, e.g. '16A 110V 2P+E 4h'
   created_at: string
   updated_at: string
 }

@@ -4,6 +4,9 @@ import { supabase } from '../lib/supabase'
 import SearchBar from './SearchBar'
 import ExtrasAdmin from './ExtrasAdmin'
 import { CapacityNote } from './CapacityPanel'
+import { WithPicture } from './PartPicture'
+import PictureManager from './PictureManager'
+import RangeManager from './RangeManager'
 import { pairKey } from '../utils/compatibility'
 import { useSectionConfig, sectionInsert } from '../utils/sections'
 import { SLOTS, readCapacity, hasCapacity } from '../utils/capacity'
@@ -27,7 +30,7 @@ interface Props {
 }
 
 type AdminTab = 'products' | 'presets' | 'extras' | 'settings'
-type ProductPanel = 'variants' | 'prerequisites' | 'compat' | 'capacity' | null
+type ProductPanel = 'variants' | 'prerequisites' | 'compat' | 'capacity' | 'picture' | 'range' | null
 
 interface EditBuffer { description: string; category: Category; part_number: string; factory_cost: string; notes: string }
 const emptyBuffer = (category: Category = 'Outgoing'): EditBuffer => ({ description: '', category, part_number: '', factory_cost: '', notes: '' })
@@ -611,7 +614,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
   const filtered = useMemo(() => {
     if (!search.trim()) return products
     const q = search.toLowerCase()
-    return products.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
+    return products.filter((p) => p.description.toLowerCase().includes(q) || (p.part_number ?? '').toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || (p.range_name ?? '').toLowerCase().includes(q))
   }, [products, search])
 
   const variantCountByProduct = useMemo(() => {
@@ -779,7 +782,7 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                       <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                         <input type="checkbox" checked={isReviewed} onChange={() => toggleReviewed(p.id)} style={{ width: 15, height: 15, accentColor: 'var(--success)', cursor: 'pointer' }} />
                       </td>
-                      <td style={isReviewed ? { textDecoration: 'line-through', color: 'var(--text-3)' } : {}}>{p.description}{cfg.usesCapacity && <CapacityNote product={p} />}</td>
+                      <td style={isReviewed ? { textDecoration: 'line-through', color: 'var(--text-3)' } : {}}><WithPicture product={p} size={36}>{p.description}{cfg.usesRanges && p.range_name && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>Range: {p.range_name}{p.option_label ? ` · ${p.option_label}` : ''}</div>}{cfg.usesCapacity && <CapacityNote product={p} />}</WithPicture></td>
                       <td><span style={{ fontSize: 12, color: 'var(--text-2)', background: 'var(--surface-3)', padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>{p.category}</span></td>
                       <td>{p.part_number ? <span className="part-number">{p.part_number}</span> : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 500 }}>{p.factory_cost != null ? `£${p.factory_cost.toFixed(2)}` : <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>—</span>}</td>
@@ -790,6 +793,8 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                           <button className="btn btn-sm" style={incompatCount > 0 ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : {}} onClick={() => togglePanel(p.id, 'compat')}>Incompatible{incompatCount > 0 ? ` (${incompatCount})` : ''}</button>
                           <button className="btn btn-sm" style={variantCount > 0 ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : {}} onClick={() => togglePanel(p.id, 'variants')}>Variants{variantCount > 0 ? ` (${variantCount})` : ''}</button>
                           {cfg.usesCapacity && <button className="btn btn-sm" style={hasCapacity(p) ? { borderColor: 'var(--info)', color: 'var(--info)' } : {}} onClick={() => togglePanel(p.id, 'capacity')}>Capacity{hasCapacity(p) ? ' ✓' : ''}</button>}
+                          {cfg.usesRanges && <button className="btn btn-sm" style={p.range_name ? { borderColor: 'var(--info)', color: 'var(--info)' } : {}} onClick={() => togglePanel(p.id, 'range')}>Range{p.range_name ? ' ✓' : ''}</button>}
+                          {cfg.usesPictures && <button className="btn btn-sm" style={p.image_url ? { borderColor: 'var(--info)', color: 'var(--info)' } : {}} onClick={() => togglePanel(p.id, 'picture')}>Picture{p.image_url ? ' ✓' : ''}</button>}
                           <button className="btn btn-sm" onClick={() => startEdit(p)}>Edit</button>
                           <button className="btn btn-sm btn-danger" onClick={() => deleteProduct(p.id)}>Remove</button>
                         </div>
@@ -814,6 +819,16 @@ function ProductsTab({ products, variants, prerequisites, incompatibilities, onR
                   {currentPanel === 'capacity' && !isEditingThis && (
                     <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
                       <CapacityManager product={p} onRefresh={onRefreshProducts} showToast={showToast} />
+                    </td></tr>
+                  )}
+                  {currentPanel === 'range' && !isEditingThis && (
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <RangeManager key={p.id} product={p} products={products} onRefresh={onRefreshProducts} showToast={showToast} />
+                    </td></tr>
+                  )}
+                  {currentPanel === 'picture' && !isEditingThis && (
+                    <tr style={{ background: 'var(--surface-2)' }}><td colSpan={7} style={{ padding: '4px 12px 12px' }}>
+                      <PictureManager key={p.id} product={p} products={products} onRefresh={onRefreshProducts} showToast={showToast} />
                     </td></tr>
                   )}
                 </Fragment>

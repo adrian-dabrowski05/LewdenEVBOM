@@ -8,6 +8,8 @@ import type {
 import { EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
+import { WithPicture } from './PartPicture'
+import RangeList from './RangeList'
 import { useSectionConfig } from '../utils/sections'
 import { capacityUsage } from '../utils/capacity'
 import { printQuote } from '../utils/printQuote'
@@ -692,7 +694,8 @@ export default function QuoteBuilder({
     return catalogue.filter((p) =>
       p.description.toLowerCase().includes(q) ||
       (p.part_number ?? '').toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q),
+      p.category.toLowerCase().includes(q) ||
+      (p.range_name ?? '').toLowerCase().includes(q),
     )
   }, [catalogue, search])
 
@@ -990,7 +993,30 @@ export default function QuoteBuilder({
               </span>
             </div>
 
-            {isOpen && (
+            {isOpen && cfg.usesRanges && !canMove && (
+              <RangeList
+                items={items}
+                all={products}
+                qtyOf={(id) => quantities[id] ?? 0}
+                onQuoteOf={(id) => finalQty[id] ?? 0}
+                setQty={setQty}
+                blockedOf={(p) => (finalQty[p.id] ?? 0) <= 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+                clashOf={(p) => (finalQty[p.id] ?? 0) > 0 && clashesFor(p.id, incompatMap, finalQty).length > 0}
+                partNumberOf={(p) => getDisplayPartNumber(p, variantSelections[p.id] ? variantsById[variantSelections[p.id]] ?? null : null)}
+                renderDetails={(p) => (
+                  <>
+                    <IncompatNote clashIds={clashesFor(p.id, incompatMap, finalQty)} productsById={productsById} onQuote={(finalQty[p.id] ?? 0) > 0} />
+                    {renderAutoAddedNote(p)}
+                    {renderExtrasNote(p)}
+                    {renderPrereqNote(p, true)}
+                    {renderVariantDropdown(p, true)}
+                  </>
+                )}
+                openAll={searchActive}
+              />
+            )}
+
+            {isOpen && !(cfg.usesRanges && !canMove) && (
               <>
                 <div className="card" style={{ marginBottom: 4 }}>
                   <table className="product-table">
@@ -1019,6 +1045,7 @@ export default function QuoteBuilder({
                           <tr key={p.id} style={blocked ? { background: 'var(--surface-3)', color: 'var(--text-3)' } : isAutoAdded && qty > 0 ? { background: 'rgba(5,150,105,0.04)' } : {}}>
                             {canMove && <td style={{ verticalAlign: 'middle' }}><MoveButtons {...moveProps(idx)} /></td>}
                             <td>
+                              <WithPicture product={p} size={44}>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
                               {cfg.usesCapacity && <CapacityNote product={p} />}
@@ -1027,6 +1054,7 @@ export default function QuoteBuilder({
                               {renderExtrasNote(p)}
                               {renderPrereqNote(p)}
                               {renderVariantDropdown(p)}
+                              </WithPicture>
                             </td>
                             <td>
                               {displayPN ? (
@@ -1063,6 +1091,7 @@ export default function QuoteBuilder({
                           </div>
                         )}
                         <div className="product-card-header">
+                          <WithPicture product={p} size={52}>
                           <div>
                             <div className="product-card-desc">{p.description}</div>
                             {displayPN && <span className="part-number" style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}>{displayPN}</span>}
@@ -1071,6 +1100,7 @@ export default function QuoteBuilder({
                             {renderAutoAddedNote(p)}
                             {renderExtrasNote(p)}
                           </div>
+                          </WithPicture>
                           <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div>
                         </div>
                         {renderPrereqNote(p, true)}
