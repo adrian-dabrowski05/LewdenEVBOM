@@ -24,6 +24,18 @@ export default function CapacityPanel({ products, qty, compact = false }: { prod
           {lines.map((l) => {
             const pct = l.provided > 0 ? Math.min(100, (l.used / l.provided) * 100) : l.used > 0 ? 100 : 0
             const colour = l.over ? 'var(--danger)' : l.used === l.provided && l.used > 0 ? 'var(--warning)' : 'var(--success)'
+            if (l.full) {
+              // Seats of this size are left, but no socket positions: nothing more of this size fits
+              return (
+                <div key={l.key} style={{ opacity: 0.6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13 }}>
+                    <span style={{ color: 'var(--text-3)' }}>{l.label}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-3)' }}>{l.used > 0 ? `${l.used} · ` : ''}Full</span>
+                  </div>
+                  {!compact && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>No socket positions left, so no more of this size fit.</div>}
+                </div>
+              )
+            }
             return (
               <div key={l.key}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13 }}>
