@@ -69,14 +69,37 @@ export function getDisplayPartNumber(product: Product, variant: ProductVariant |
 
 // disabled = the part can't be added (e.g. it clashes with something on the quote).
 // It can still be taken off if it is already there.
-export function Stepper({ value, onChange, disabled }: { value: number; onChange: (n: number) => void; disabled?: boolean }) {
+// Smallest amount a part can be quoted in: whole units, or halves/quarters for
+// parts that can be cut (set in Admin > Capacity)
+export const qtyStep = (p: Product): number => (p.qty_step != null && p.qty_step > 0 && p.qty_step < 1 ? Number(p.qty_step) : 1)
+
+// Rounds to the nearest step (0.25, 0.5…) without floating point dust
+const snapQty = (n: number, step: number) => Math.max(0, Number((Math.round(n / step) * step).toFixed(4)))
+
+export function Stepper({ value, onChange, disabled, step = 1 }: { value: number; onChange: (n: number) => void; disabled?: boolean; step?: number }) {
   const noAdd = !!disabled
+  const whole = step >= 1
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = (text: string) => {
+    setDraft(null)
+    const n = snapQty(parseFloat(text) || 0, step)
+    if (noAdd && n > value) return
+    if (n !== value) onChange(n)
+  }
   return (
     <div className="stepper" style={noAdd && value <= 0 ? { opacity: 0.45 } : undefined} title={noAdd ? 'Not available with what is on the quote' : undefined}>
-      <button className="stepper-btn" disabled={value <= 0} onPointerDown={(e) => { e.preventDefault(); if (value > 0) onChange(Math.max(0, value - 1)) }} aria-label="Decrease">−</button>
-      <input className="stepper-input" type="number" min="0" max="999" value={value || ''} placeholder="0" disabled={noAdd && value <= 0}
-        onChange={(e) => { const n = Math.max(0, parseInt(e.target.value) || 0); if (noAdd && n > value) return; onChange(n) }} />
-      <button className="stepper-btn" disabled={noAdd} style={noAdd ? { cursor: 'not-allowed' } : undefined} onPointerDown={(e) => { e.preventDefault(); if (!noAdd) onChange(value + 1) }} aria-label="Increase">+</button>
+      <button className="stepper-btn" disabled={value <= 0} onPointerDown={(e) => { e.preventDefault(); if (value > 0) onChange(whole ? Math.max(0, value - 1) : snapQty(value - step, step)) }} aria-label="Decrease">−</button>
+      {whole ? (
+        <input className="stepper-input" type="number" min="0" max="999" value={value || ''} placeholder="0" disabled={noAdd && value <= 0}
+          onChange={(e) => { const n = Math.max(0, parseInt(e.target.value) || 0); if (noAdd && n > value) return; onChange(n) }} />
+      ) : (
+        <input className="stepper-input" type="text" inputMode="decimal" value={draft ?? (value ? String(value) : '')} placeholder="0" disabled={noAdd && value <= 0}
+          title={`Can be quoted in steps of ${step}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+      )}
+      <button className="stepper-btn" disabled={noAdd} style={noAdd ? { cursor: 'not-allowed' } : undefined} onPointerDown={(e) => { e.preventDefault(); if (!noAdd) onChange(whole ? value + 1 : snapQty(value + step, step)) }} aria-label="Increase">+</button>
     </div>
   )
 }
@@ -1062,7 +1085,7 @@ export default function QuoteBuilder({
                               ) : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}
                             </td>
                             <td className="right">{p.factory_cost != null ? <span style={{ fontWeight: 500 }}>{fmt(p.factory_cost)}</span> : <span className="cost-tbc">TBC</span>}</td>
-                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div></td>
+                            <td className="right"><div style={{ display: 'flex', justifyContent: 'flex-end' }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} step={qtyStep(p)} /></div></td>
                             <td className="right" style={{ fontWeight: onQuote > 0 ? 600 : 400 }}>{lineTotal != null ? fmt(lineTotal) : onQuote > 0 ? <span className="cost-tbc">TBC</span> : <span style={{ color: 'var(--text-3)' }}>—</span>}</td>
                           </tr>
                         )
@@ -1101,7 +1124,7 @@ export default function QuoteBuilder({
                             {renderExtrasNote(p)}
                           </div>
                           </WithPicture>
-                          <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} /></div>
+                          <div style={{ flexShrink: 0 }}><Stepper value={qty} onChange={(n) => setQty(p.id, n)} disabled={blocked} step={qtyStep(p)} /></div>
                         </div>
                         {renderPrereqNote(p, true)}
                         {renderVariantDropdown(p, true)}
