@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
-  QuoteFormData, AppSettings, Extra, BuildContext, ExtraCostMap,
+  QuoteFormData, AppSettings, Extra, BuildContext, ExtraCostMap, CustomItem,
 } from '../types'
 import { EXTRAS_CATEGORY } from '../types'
 import { printQuote } from '../utils/printQuote'
@@ -10,6 +10,7 @@ import type { ExtrasResult } from '../utils/extras'
 import { toQuoteExtras } from '../utils/extras'
 import { quotePricing } from '../utils/pricing'
 import type { EditingQuote } from '../App'
+import { CustomItemsCard, CustomBomLines, customPrintItems } from './CustomItems'
 import { Stepper, PresetsBar, ExtraRow, BuildContextFields, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
 import type { IncompatMap } from '../utils/compatibility'
 import { clashesFor } from '../utils/compatibility'
@@ -53,6 +54,8 @@ interface Props {
   onMoveProduct: (productId: string, groupIds: string[], dir: -1 | 1) => void
   onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
   reordering: boolean
+  customItems: CustomItem[]   // rep's one-off items, typed in on Review & save
+  setCustomItems: (items: CustomItem[]) => void
 }
 
 // ── Where every part and extra goes ────────────────────────────
@@ -178,7 +181,7 @@ export default function StepBuilder({
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearQuote, canClear, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
-  isAdmin, onMoveProduct, onMoveExtra, reordering,
+  isAdmin, onMoveProduct, onMoveExtra, reordering, customItems, setCustomItems,
 }: Props) {
   const [sectionIdx, setSectionIdx] = useState(0)
   const [reorderToggle, setReorderToggle] = useState(false)
@@ -291,7 +294,7 @@ export default function StepBuilder({
 
   // ── Actions ──
   const handleSave = async (asNew = false) => {
-    if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
+    if (activeCount === 0 && extrasResult.customLines.length === 0) { showToast('Add at least one item first', 'error'); return }
     if (!quoteForm.project_name.trim()) { showToast('Project name is required', 'error'); return }
     setSaving(true)
     const ok = await onSave(quoteForm, asNew)
@@ -316,7 +319,7 @@ export default function StepBuilder({
   }
 
   const handlePdf = () => {
-    if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
+    if (activeCount === 0 && extrasResult.customLines.length === 0) { showToast('Add at least one item first', 'error'); return }
     printQuote({
       form: { project_name: quoteForm.project_name, customer_name: quoteForm.customer_name, mo_number: quoteForm.mo_number, notes: quoteForm.notes },
       items: activeItems.map((p) => {
@@ -329,7 +332,7 @@ export default function StepBuilder({
           line_total: p.factory_cost != null ? p.factory_cost * finalQty[p.id] : null,
           variant_label: selectedVariant?.label ?? null,
         }
-      }),
+      }).concat(customPrintItems(extrasResult.customLines)),   // rep's one-off items
       extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, pricing,
@@ -475,9 +478,11 @@ export default function StepBuilder({
         </div>
       )}
 
+      <CustomItemsCard items={customItems} setItems={setCustomItems} />
+
       <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
         <div style={sectionTitleStyle}>Bill of materials</div>
-        {activeCount === 0 && <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Nothing added yet. Go back through the steps to add parts.</div>}
+        {activeCount === 0 && extrasResult.customLines.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Nothing added yet. Go back through the steps to add parts.</div>}
         {SECTIONS.filter((s) => s.key !== 'review').map((s, idx) => {
           const items = activeItems.filter((p) => p.category !== EXTRAS_CATEGORY && sectionOf(p) === s.key)
           if (items.length === 0) return null
@@ -509,6 +514,7 @@ export default function StepBuilder({
             </div>
           )
         })()}
+        <CustomBomLines lines={extrasResult.customLines} />
         {extrasResult.applied.length > 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-2)', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
             Extras ticked: {extrasResult.applied.map(({ extra, count }) => `${extra.number}. ${extra.name}${extra.scales_with_bom ? ` (×${count})` : ''}`).join(' · ')}
