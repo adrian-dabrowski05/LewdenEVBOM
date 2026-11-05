@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { Product, Extra, ExtraItem, CabinetMaterial } from '../types'
-import { CATEGORIES } from '../types'
 import { supabase } from '../lib/supabase'
 import { MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
+import { useSectionConfig, sectionInsert } from '../utils/sections'
 
 type ShowToast = (msg: string, type?: 'success' | 'error') => void
 
@@ -37,10 +37,11 @@ function toggleIn<T>(list: T[], value: T): T[] {
 }
 
 function ProductSelect({ products, value, onChange }: { products: Product[]; value: string; onChange: (id: string) => void }) {
+  const cfg = useSectionConfig()
   return (
     <select className="input input-sm" value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Select a product…</option>
-      {CATEGORIES.map((cat) => {
+      {cfg.categories.map((cat) => {
         const cp = products.filter((p) => p.category === cat)
         if (!cp.length) return null
         return <optgroup key={cat} label={cat}>{cp.map((p) => <option key={p.id} value={p.id}>{p.description}{p.part_number ? ` (${p.part_number})` : ''}</option>)}</optgroup>
@@ -51,6 +52,8 @@ function ProductSelect({ products, value, onChange }: { products: Product[]; val
 
 // ── Items of one extra ────────────────────────────────────────
 function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: Extra; products: Product[]; onRefresh: () => void; showToast: ShowToast }) {
+  // EV only: lines can depend on the pillar's current rating and cabinet size
+  const { usesBuildContext } = useSectionConfig()
   const [action, setAction] = useState<'add' | 'remove'>('add')
   const [productId, setProductId] = useState('')
   const [qty, setQty] = useState('1')
@@ -129,14 +132,18 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
                 style={{ width: 60, padding: '4px 8px', fontSize: 13, border: '1.5px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', textAlign: 'center', fontFamily: 'var(--mono)', fontWeight: 500 }}
                 defaultValue={item.quantity}
                 onBlur={(e) => { const q = parseFloat(e.target.value); if (q > 0 && q !== item.quantity) updateItem(item, { quantity: q }) }} />
-              <select className="input input-sm" style={{ width: 'auto' }} title="Only at this current rating" value={item.condition_rating ?? ''} onChange={(e) => updateItem(item, { condition_rating: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Any rating</option>
-                {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A only</option>)}
-              </select>
-              <select className="input input-sm" style={{ width: 'auto' }} title="Only for this cabinet size" value={item.condition_size ?? ''} onChange={(e) => updateItem(item, { condition_size: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Any size</option>
-                {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n} only</option>)}
-              </select>
+              {usesBuildContext && (
+                <>
+                  <select className="input input-sm" style={{ width: 'auto' }} title="Only at this current rating" value={item.condition_rating ?? ''} onChange={(e) => updateItem(item, { condition_rating: e.target.value ? Number(e.target.value) : null })}>
+                    <option value="">Any rating</option>
+                    {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A only</option>)}
+                  </select>
+                  <select className="input input-sm" style={{ width: 'auto' }} title="Only for this cabinet size" value={item.condition_size ?? ''} onChange={(e) => updateItem(item, { condition_size: e.target.value ? Number(e.target.value) : null })}>
+                    <option value="">Any size</option>
+                    {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n} only</option>)}
+                  </select>
+                </>
+              )}
               {!isRemove && <WhenSelect value={whenOf(item)} onChange={(v) => updateItem(item, whenFields(v))} />}
               <button className="btn btn-sm btn-danger" onClick={() => removeItem(item.id)}>Delete</button>
             </div>
@@ -160,20 +167,24 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
           <label style={smallLabel}>Qty</label>
           <input className="input input-sm" type="number" min="1" step="1" value={qty} onChange={(e) => setQty(e.target.value)} style={{ fontFamily: 'var(--mono)', textAlign: 'center' }} />
         </div>
-        <div style={{ width: 120 }}>
-          <label style={smallLabel}>Rating</label>
-          <select className="input input-sm" value={rating} onChange={(e) => setRating(e.target.value)}>
-            <option value="">Any</option>
-            {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A only</option>)}
-          </select>
-        </div>
-        <div style={{ width: 120 }}>
-          <label style={smallLabel}>Cabinet size</label>
-          <select className="input input-sm" value={size} onChange={(e) => setSize(e.target.value)}>
-            <option value="">Any</option>
-            {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n} only</option>)}
-          </select>
-        </div>
+        {usesBuildContext && (
+          <>
+            <div style={{ width: 120 }}>
+              <label style={smallLabel}>Rating</label>
+              <select className="input input-sm" value={rating} onChange={(e) => setRating(e.target.value)}>
+                <option value="">Any</option>
+                {RATING_OPTIONS.map((r) => <option key={r} value={r}>{r}A only</option>)}
+              </select>
+            </div>
+            <div style={{ width: 120 }}>
+              <label style={smallLabel}>Cabinet size</label>
+              <select className="input input-sm" value={size} onChange={(e) => setSize(e.target.value)}>
+                <option value="">Any</option>
+                {SIZE_OPTIONS.map((n) => <option key={n} value={n}>Size {n} only</option>)}
+              </select>
+            </div>
+          </>
+        )}
         {action === 'add' && (
           <div>
             <label style={smallLabel}>When</label>
@@ -191,6 +202,7 @@ function ExtraItemsManager({ extra, products, onRefresh, showToast }: { extra: E
 
 // ── Extras tab ────────────────────────────────────────────────
 export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: { extras: Extra[]; products: Product[]; onRefresh: () => void; showToast: ShowToast }) {
+  const cfg = useSectionConfig()
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [buf, setBuf] = useState<MetaBuffer | null>(null)
@@ -226,8 +238,13 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
 
   const createExtra = async () => {
     const nextNumber = extras.reduce((m, e) => Math.max(m, e.number), 0) + 1
-    const { data, error } = await supabase.from('extras').insert({ number: nextNumber, name: `Extra ${nextNumber}`, is_enabled: false, labour_minutes: 0 }).select().single()
-    if (error || !data) { showToast('Failed to create extra', 'error'); return }
+    const { data, error } = await supabase.from('extras').insert({ number: nextNumber, name: `Extra ${nextNumber}`, is_enabled: false, labour_minutes: 0, ...sectionInsert(cfg) }).select().single()
+    if (error || !data) {
+      // TopTer extras are numbered from 1 on their own, which needs supabase/topter-section.sql
+      const needsSql = cfg.key !== 'ev' && error && /section|duplicate|unique/i.test(error.message)
+      showToast(needsSql ? 'Run supabase/topter-section.sql in Supabase first' : 'Failed to create extra', 'error')
+      return
+    }
     showToast(`Extra ${nextNumber} created`); onRefresh(); startEdit({ ...data, extra_items: [] })
   }
 
@@ -245,7 +262,11 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
         <div className="toolbar-right"><button className="btn btn-primary" onClick={createExtra}>+ New extra</button></div>
       </div>
 
-      {extras.length === 0 && <div className="empty-state"><div className="empty-state-icon">➕</div><h3>No extras yet</h3><p>Run the extras SQL in Supabase to set up extras 1–13</p></div>}
+      {extras.length === 0 && (
+        <div className="empty-state"><div className="empty-state-icon">➕</div><h3>No extras yet</h3>
+          <p>{cfg.key === 'ev' ? 'Run the extras SQL in Supabase to set up extras 1–13' : 'Add one with + New extra. Use Reorder in the quote builder to put them in order.'}</p>
+        </div>
+      )}
 
       {extras.map((extra) => {
         const isOpen = expanded === extra.id
@@ -294,7 +315,7 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                         )}
                       </div>
                     </div>
-                    <div style={{ marginBottom: 10 }}>
+                    {cfg.usesBuildContext && <div style={{ marginBottom: 10 }}>
                       <label style={smallLabel}>Only for these current ratings (none ticked = any)</label>
                       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         {RATING_OPTIONS.map((r) => (
@@ -303,8 +324,8 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                           </label>
                         ))}
                       </div>
-                    </div>
-                    <div style={{ marginBottom: 10 }}>
+                    </div>}
+                    {cfg.usesBuildContext && <div style={{ marginBottom: 10 }}>
                       <label style={smallLabel}>Only for these cabinets (none ticked = any)</label>
                       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         {(Object.keys(MATERIAL_LABELS) as CabinetMaterial[]).map((m) => (
@@ -313,7 +334,7 @@ export default function ExtrasAdmin({ extras, products, onRefresh, showToast }: 
                           </label>
                         ))}
                       </div>
-                    </div>
+                    </div>}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn btn-sm" onClick={() => { setEditingId(null); setBuf(null) }}>Cancel</button>
                       <button className="btn btn-sm btn-primary" onClick={() => saveMeta(extra.id)} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>

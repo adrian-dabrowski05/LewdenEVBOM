@@ -5,8 +5,11 @@ import type {
   QuantityMap, VariantSelectionMap, AutoAddedMap,
   QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial, ExtraCostMap,
 } from '../types'
-import { CATEGORIES, EXTRAS_CATEGORY } from '../types'
+import { EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
+import CapacityPanel, { CapacityNote } from './CapacityPanel'
+import { useSectionConfig } from '../utils/sections'
+import { capacityUsage } from '../utils/capacity'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult, AppliedExtra } from '../utils/extras'
 import type { EditingQuote } from '../App'
@@ -318,10 +321,11 @@ function PresetModal({ preset, products, onApply, onClose }: {
 }
 
 // ── Presets bar ────────────────────────────────────────────────
-export function PresetsBar({ presets, products, onApply }: {
+export function PresetsBar({ presets, products, onApply, compact = false }: {
   presets: Preset[]
   products: Product[]
   onApply: (preset: Preset, configId?: string) => void
+  compact?: boolean   // long preset ranges (TopTer): the list scrolls instead of filling the page
 }) {
   const [previewPreset, setPreviewPreset] = useState<Preset | null>(null)
   const [search, setSearch] = useState('')
@@ -388,7 +392,7 @@ export function PresetsBar({ presets, products, onApply }: {
           <div style={{ fontSize: 12, color: 'var(--secondary-text)', opacity: 0.7, padding: '4px 0' }}>No presets match "{search}"</div>
         )}
 
-        <div className="presets-list">
+        <div className="presets-list" style={compact ? { maxHeight: 156, overflowY: 'auto', paddingRight: 4 } : undefined}>
           {filtered.map((preset) => {
             const configCount = preset.preset_configurations?.length ?? 0
             return (
@@ -531,7 +535,7 @@ export function BuildContextFields({ ctx, setCtx }: { ctx: BuildContext; setCtx:
 }
 
 // ── Extras panel ───────────────────────────────────────────────
-function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost, result, ctx, setCtx, productsById, reorderMode, reordering, onMoveExtra }: {
+function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost, result, ctx, setCtx, productsById, reorderMode, reordering, onMoveExtra, showContext = true }: {
   extras: Extra[]
   selected: Set<string>
   onToggle: (extraId: string) => void
@@ -545,6 +549,7 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost,
   reorderMode: boolean
   reordering: boolean
   onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
+  showContext?: boolean   // EV: current rating / cabinet / size pickers
 }) {
   if (extras.length === 0) return null
   const ids = extras.map((e) => e.id)
@@ -553,10 +558,10 @@ function ExtrasPanel({ extras, selected, onToggle, onSetCount, costs, onSetCost,
     <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)' }}>Extras</div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset or steelwork — change if needed</div>
+        {showContext && <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Filled in from the preset or steelwork — change if needed</div>}
       </div>
 
-      <div style={{ marginBottom: 12 }}><BuildContextFields ctx={ctx} setCtx={setCtx} /></div>
+      {showContext && <div style={{ marginBottom: 12 }}><BuildContextFields ctx={ctx} setCtx={setCtx} /></div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {extras.map((extra, i) => {
@@ -631,6 +636,7 @@ export default function QuoteBuilder({
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
+  const cfg = useSectionConfig()
   const [search, setSearch] = useState('')
   const [reorderToggle, setReorderToggle] = useState(false)
   const reorderMode = isAdmin && reorderToggle
@@ -692,10 +698,10 @@ export default function QuoteBuilder({
 
   const byCategory = useMemo(() => {
     const map: Record<string, Product[]> = {}
-    CATEGORIES.forEach((c) => { map[c] = [] })
+    cfg.categories.forEach((c) => { map[c] = [] })
     filtered.forEach((p) => { if (map[p.category]) map[p.category].push(p) })
     return map
-  }, [filtered])
+  }, [filtered, cfg])
 
   // Quantities after extras — used for totals, PDF and save
   const finalQty = extrasResult.effectiveQty
@@ -724,6 +730,9 @@ export default function QuoteBuilder({
   const factoryCost = materialsSubtotal + hardwareUpliftAmount + labourTotal + extrasResult.repCost
   // Carriage stays out of the factory cost: no profit or rebate on it, added after the rebate
   const pricing = quotePricing(factoryCost, quoteForm.gp_pct, quoteForm.rebate_pct, carriage)
+
+  // TopTer: slots used beyond what the boards on the quote provide
+  const overCapacity = cfg.usesCapacity ? capacityUsage(products, finalQty).filter((l) => l.over) : []
 
   const handleClear = () => {
     if (activeCount === 0) return
@@ -780,6 +789,7 @@ export default function QuoteBuilder({
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, pricing,
       baseUrl: (import.meta as any).env.BASE_URL,
+      section: cfg.key,
     })
   }
 
@@ -870,7 +880,7 @@ export default function QuoteBuilder({
         </div>
       )}
 
-      <PresetsBar presets={presets} products={catalogue} onApply={onApplyPreset} />
+      <PresetsBar presets={presets} products={catalogue} onApply={onApplyPreset} compact={cfg.usesCapacity} />
 
       {/* Quote info */}
       <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
@@ -933,9 +943,11 @@ export default function QuoteBuilder({
         </div>
       </div>
 
+      {cfg.usesCapacity && <CapacityPanel products={products} qty={finalQty} />}
+
       {reorderMode && <ReorderBanner />}
 
-      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} costs={extraCosts} onSetCost={onSetExtraCost} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} reorderMode={reorderMode} reordering={reordering} onMoveExtra={onMoveExtra} />
+      <ExtrasPanel extras={extras} selected={selectedExtras} onToggle={onToggleExtra} onSetCount={onSetExtraCount} costs={extraCosts} onSetCost={onSetExtraCost} result={extrasResult} ctx={buildContext} setCtx={setBuildContext} productsById={productsById} reorderMode={reorderMode} reordering={reordering} onMoveExtra={onMoveExtra} showContext={cfg.usesBuildContext} />
 
       <div className="toolbar" style={isAdmin ? { display: 'flex', gap: 8, alignItems: 'center' } : undefined}>
         <div style={{ flex: 1, minWidth: 0 }}><SearchBar value={search} onChange={setSearch} placeholder="Search parts, part numbers, categories…" /></div>
@@ -958,7 +970,7 @@ export default function QuoteBuilder({
         <div className="empty-state"><div className="empty-state-icon">🔍</div><h3>No parts found</h3><p>Try a different search term or part number</p></div>
       )}
 
-      {CATEGORIES.map((cat) => {
+      {cfg.categories.map((cat) => {
         const items = byCategory[cat] ?? []
         if (items.length === 0) return null
         const isOpen = searchActive || !collapsed.has(cat)
@@ -1009,6 +1021,7 @@ export default function QuoteBuilder({
                             <td>
                               <div style={{ fontWeight: qty > 0 ? 500 : 400 }}>{p.description}</div>
                               {p.notes && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{p.notes}</div>}
+                              {cfg.usesCapacity && <CapacityNote product={p} />}
                               <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
                               {renderAutoAddedNote(p)}
                               {renderExtrasNote(p)}
@@ -1053,6 +1066,7 @@ export default function QuoteBuilder({
                           <div>
                             <div className="product-card-desc">{p.description}</div>
                             {displayPN && <span className="part-number" style={{ marginTop: 4, display: 'inline-block', ...(selectedVariant?.part_number_suffix ? { color: 'var(--brand)', background: 'var(--brand-light)', fontWeight: 600 } : {}) }}>{displayPN}</span>}
+                            {cfg.usesCapacity && <CapacityNote product={p} />}
                             <IncompatNote clashIds={clashIds} productsById={productsById} onQuote={onQuote > 0} />
                             {renderAutoAddedNote(p)}
                             {renderExtrasNote(p)}
@@ -1121,6 +1135,7 @@ export default function QuoteBuilder({
           <div className="total-bar-amount">{`£${pricing.totalQuote.toFixed(2)}`}</div>
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 2 }}>Factory cost £{factoryCost.toFixed(2)}</div>
           {activeCount > 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{activeCount} line item{activeCount !== 1 ? 's' : ''}</div>}
+          {overCapacity.length > 0 && <div style={{ fontSize: 11, color: 'var(--secondary)', fontWeight: 600, marginTop: 2 }}>⚠ Over board capacity: {overCapacity.map((l) => l.label.toLowerCase()).join(', ')}</div>}
         </div>
         <div className="total-bar-actions">
           {activeCount > 0 && <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
@@ -1137,12 +1152,17 @@ export default function QuoteBuilder({
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="modal-handle" />
             <h2 style={{ marginBottom: 4 }}>{editingQuote ? 'Update quote' : 'Save quote'}</h2>
-            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 ? 10 : 20 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 || overCapacity.length > 0 ? 10 : 20 }}>
               {activeCount} item{activeCount !== 1 ? 's' : ''} · factory cost £{factoryCost.toFixed(2)} · total quote £{pricing.totalQuote.toFixed(2)}
             </p>
             {missingVariants.length > 0 && (
               <div style={{ padding: '8px 12px', background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--warning)', marginBottom: 16 }}>
                 Note: {missingVariants.length} item{missingVariants.length !== 1 ? 's' : ''} still need a variant selected.
+              </div>
+            )}
+            {overCapacity.length > 0 && (
+              <div style={{ padding: '8px 12px', background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--warning)', marginBottom: 16 }}>
+                Note: more {overCapacity.map((l) => l.label.toLowerCase()).join(', ')} are used than the boards on the quote provide.
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>

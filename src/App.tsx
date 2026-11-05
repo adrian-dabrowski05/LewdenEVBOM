@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { Dispatch, SetStateAction, MutableRefObject } from 'react'
 import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility,
+  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility, Section,
 } from './types'
 import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 import { quotePricing } from './utils/pricing'
 import { buildIncompatMap } from './utils/compatibility'
+import { SECTIONS, SectionContext, sectionOf, sectionInsert } from './utils/sections'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -16,6 +18,8 @@ import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import QuoteBuilder from './components/QuoteBuilder'
 import StepBuilder from './components/StepBuilder'
+import TopterStepBuilder from './components/TopterStepBuilder'
+import SectionSwitch from './components/SectionSwitch'
 import SavedQuotes from './components/SavedQuotes'
 import AdminPanel from './components/AdminPanel'
 import AdminLogin from './components/AdminLogin'
@@ -43,31 +47,83 @@ const DEFAULT_FORM: QuoteFormData = {
 // The saved quote currently loaded into the builder for editing
 export interface EditingQuote { id: string; project_name: string }
 
+// Builder state kept separately for each section, so a half-built EV quote is
+// still there after looking at TopTer and back. The setter works on whichever
+// section is open when it is called, so it never changes and the callbacks that
+// use it don't need to know about sections.
+function useSectionState<T>(section: Section, sectionRef: MutableRefObject<Section>, initial: () => T): [T, Dispatch<SetStateAction<T>>] {
+  const [state, setState] = useState<Record<Section, T>>(() => ({ ev: initial(), topter: initial() }))
+  const set = useCallback<Dispatch<SetStateAction<T>>>((action) => {
+    const key = sectionRef.current
+    setState((prev) => {
+      const next = typeof action === 'function' ? (action as (p: T) => T)(prev[key]) : action
+      return Object.is(next, prev[key]) ? prev : { ...prev, [key]: next }
+    })
+  }, [sectionRef])
+  return [state[section], set]
+}
+
+// Which section was open last time (admin only, remembered on this device)
+function storedSection(): Section {
+  try { return localStorage.getItem('quote_section') === 'topter' ? 'topter' : 'ev' } catch { return 'ev' }
+}
+
 export default function App() {
   const [view, setView] = useState<View>('builder')
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminLogin, setShowAdminLogin] = useState(false)
 
-  const [products, setProducts] = useState<Product[]>([])
+  // ── Quoting section ─────────────────────────────────────────
+  // EV feeder pillars for everyone. Admins can switch to TopTer, which stays
+  // hidden from everyone else until it is finished. Signing out goes back to EV.
+  const [section, setSection] = useState<Section>(storedSection)
+  const activeSection: Section = isAdmin ? section : 'ev'
+  const cfg = SECTIONS[activeSection]
+  const sectionRef = useRef<Section>(activeSection)
+  sectionRef.current = activeSection
+  const changeSection = (next: Section) => {
+    setSection(next)
+    try { localStorage.setItem('quote_section', next) } catch { /* private window etc. */ }
+  }
+
+  // Everything is loaded once; each section only sees its own rows
+  const [allProducts, setAllProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [prerequisites, setPrerequisites] = useState<ProductPrerequisite[]>([])
   const [incompatibilities, setIncompatibilities] = useState<ProductIncompatibility[]>([])
-  const [presets, setPresets] = useState<Preset[]>([])
-  const [extras, setExtras] = useState<Extra[]>([])
-  const [quotes, setQuotes] = useState<Quote[]>([])
+  const [allPresets, setAllPresets] = useState<Preset[]>([])
+  const [allExtras, setAllExtras] = useState<Extra[]>([])
+  const [allQuotes, setAllQuotes] = useState<Quote[]>([])
   const [quotesLoading, setQuotesLoading] = useState(false)
-  const [settings, setSettings] = useState<AppSettings>({ hardware_uplift_pct: 5, labour_rate_per_min: 0, prices_reviewed_at: '' })
+  const [settingsMap, setSettingsMap] = useState<Record<string, string>>({})
 
-  const [quantities, setQuantities] = useState<QuantityMap>({})
-  const [variantSelections, setVariantSelections] = useState<VariantSelectionMap>({})
-  const [autoAdded, setAutoAdded] = useState<AutoAddedMap>({})
-  const [quoteForm, setQuoteForm] = useState<QuoteFormData>(DEFAULT_FORM)
-  const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set())
-  const [extraCounts, setExtraCounts] = useState<ExtraCountMap>({})
-  const [extraCosts, setExtraCosts] = useState<ExtraCostMap>({})
-  const [buildContext, setBuildContext] = useState<BuildContext>(EMPTY_CONTEXT)
-  const [editingQuote, setEditingQuote] = useState<EditingQuote | null>(null)
+  const products = useMemo(() => allProducts.filter((p) => sectionOf(p) === activeSection), [allProducts, activeSection])
+  const presets = useMemo(() => allPresets.filter((p) => sectionOf(p) === activeSection), [allPresets, activeSection])
+  const extras = useMemo(() => allExtras.filter((e) => sectionOf(e) === activeSection), [allExtras, activeSection])
+  const quotes = useMemo(() => allQuotes.filter((q) => sectionOf(q) === activeSection), [allQuotes, activeSection])
+
+  // Pricing defaults per section. TopTer keys start "topter_"; until they exist
+  // TopTer uses the EV uplift and labour rate. EV reads the same keys as always.
+  const settings = useMemo<AppSettings>(() => {
+    const own = (key: string) => settingsMap[cfg.settingsPrefix + key]
+    const withFallback = (key: string) => own(key) ?? settingsMap[key]
+    return {
+      hardware_uplift_pct: parseFloat(withFallback('hardware_uplift_pct') ?? '5'),
+      labour_rate_per_min: parseFloat(withFallback('labour_rate_per_min') ?? '0'),
+      prices_reviewed_at: (own('prices_reviewed_at') ?? '').trim(),
+    }
+  }, [settingsMap, cfg])
+
+  const [quantities, setQuantities] = useSectionState<QuantityMap>(activeSection, sectionRef, () => ({}))
+  const [variantSelections, setVariantSelections] = useSectionState<VariantSelectionMap>(activeSection, sectionRef, () => ({}))
+  const [autoAdded, setAutoAdded] = useSectionState<AutoAddedMap>(activeSection, sectionRef, () => ({}))
+  const [quoteForm, setQuoteForm] = useSectionState<QuoteFormData>(activeSection, sectionRef, () => DEFAULT_FORM)
+  const [selectedExtras, setSelectedExtras] = useSectionState<Set<string>>(activeSection, sectionRef, () => new Set())
+  const [extraCounts, setExtraCounts] = useSectionState<ExtraCountMap>(activeSection, sectionRef, () => ({}))
+  const [extraCosts, setExtraCosts] = useSectionState<ExtraCostMap>(activeSection, sectionRef, () => ({}))
+  const [buildContext, setBuildContext] = useSectionState<BuildContext>(activeSection, sectionRef, () => EMPTY_CONTEXT)
+  const [editingQuote, setEditingQuote] = useSectionState<EditingQuote | null>(activeSection, sectionRef, () => null)
 
   // Only parts still in the catalogue. A removed part can still be listed in a
   // preset, a prerequisite or an extra (removing a part only hides it, so old
@@ -115,7 +171,7 @@ export default function App() {
     setProductsLoading(true)
     const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('sort_order').order('created_at').order('id')
     if (error) showToast('Failed to load products', 'error')
-    else setProducts(data || [])
+    else setAllProducts(data || [])
     setProductsLoading(false)
   }
 
@@ -145,13 +201,13 @@ export default function App() {
       .from('presets')
       .select('*, preset_items(*), preset_configurations(*, preset_configuration_items(*))')
       .order('created_at')
-    if (!error) setPresets(data || [])
+    if (!error) setAllPresets(data || [])
   }
 
   useEffect(() => { loadExtras() }, [])
   const loadExtras = async () => {
     const { data, error } = await supabase.from('extras').select('*, extra_items(*)').order('number')
-    if (!error) setExtras(sortExtras(data || []))
+    if (!error) setAllExtras(sortExtras(data || []))
   }
 
   // ── Admin: reorder parts and extras (saved for everyone) ───
@@ -183,7 +239,8 @@ export default function App() {
 
     const byId = Object.fromEntries(products.map((p) => [p.id, p]))
     const changed = products.filter((p) => p.sort_order !== newOrder[p.id])
-    setProducts(order.map((id) => ({ ...byId[id], sort_order: newOrder[id] })))
+    // This section's parts in their new order; other sections' parts stay as they are
+    setAllProducts((prev) => [...prev.filter((p) => !(p.id in byId)), ...order.map((id) => ({ ...byId[id], sort_order: newOrder[id] }))])
 
     setReordering(true)
     const results = await Promise.all(changed.map((p) => supabase.from('products').update({ sort_order: newOrder[p.id] }).eq('id', p.id)))
@@ -206,7 +263,7 @@ export default function App() {
     order.forEach((id, k) => { newOrder[id] = (k + 1) * 10 })
     const byId = Object.fromEntries(extras.map((e) => [e.id, e]))
     const changed = extras.filter((e) => e.sort_order !== newOrder[e.id])
-    setExtras(order.map((id) => ({ ...byId[id], sort_order: newOrder[id] })))
+    setAllExtras((prev) => [...prev.filter((e) => !(e.id in byId)), ...order.map((id) => ({ ...byId[id], sort_order: newOrder[id] }))])
 
     setReordering(true)
     const results = await Promise.all(changed.map((e) => supabase.from('extras').update({ sort_order: newOrder[e.id] }).eq('id', e.id)))
@@ -223,18 +280,18 @@ export default function App() {
     setSelectedExtras((prev) => { const next = new Set(prev); next.has(extraId) ? next.delete(extraId) : next.add(extraId); return next })
     // Re-ticking starts again from "replace all"
     setExtraCounts((prev) => { const next = { ...prev }; delete next[extraId]; return next })
-  }, [])
+  }, [setSelectedExtras, setExtraCounts])
 
   const setExtraCount = useCallback((extraId: string, count: number) => {
     setExtraCounts((prev) => ({ ...prev, [extraId]: Math.max(0, count) }))
-  }, [])
+  }, [setExtraCounts])
 
   // Cost the rep types in for a rep-priced extra (e.g. non-standard colour)
   const setExtraCost = useCallback((extraId: string, value: string) => {
     setExtraCosts((prev) => ({ ...prev, [extraId]: value }))
-  }, [])
+  }, [setExtraCosts])
 
-  const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}); setExtraCosts({}) }, [])
+  const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}); setExtraCosts({}) }, [setSelectedExtras, setExtraCounts, setExtraCosts])
 
   // Final BOM = rep's quantities with the ticked extras applied on top
   const extrasResult = useMemo(
@@ -248,11 +305,7 @@ export default function App() {
     if (data) {
       const map: Record<string, string> = {}
       data.forEach((row) => { map[row.key] = row.value })
-      setSettings({
-        hardware_uplift_pct: parseFloat(map['hardware_uplift_pct'] ?? '5'),
-        labour_rate_per_min: parseFloat(map['labour_rate_per_min'] ?? '0'),
-        prices_reviewed_at: (map['prices_reviewed_at'] ?? '').trim(),
-      })
+      setSettingsMap(map)
     }
   }
 
@@ -307,7 +360,7 @@ export default function App() {
       })
       return newQtys
     })
-  }, [livePrerequisites, products])
+  }, [livePrerequisites, products, setQuantities, setVariantSelections, setBuildContext, setAutoAdded])
 
   // ── Apply preset (with optional configuration) ─────────────
   const applyPreset = useCallback((preset: Preset, configurationId?: string) => {
@@ -334,19 +387,20 @@ export default function App() {
     const fromSteel = products
       .filter((p) => presetIds.has(p.id))
       .reduce<BuildContext>((ctx, p) => mergeContext(ctx, contextFromSteelwork(p)), EMPTY_CONTEXT)
-    setBuildContext(mergeContext(fromSteel, contextFromPreset(preset, configurationId)))
+    // (EV only: TopTer has no pillar rating, cabinet or size)
+    if (cfg.usesBuildContext) setBuildContext(mergeContext(fromSteel, contextFromPreset(preset, configurationId)))
 
     if (preset.default_labour_minutes != null) {
       setQuoteForm((prev) => ({ ...prev, labour_minutes: String(preset.default_labour_minutes) }))
     }
     showToast(`Preset "${preset.name}" applied`)
-  }, [livePrerequisites, products, setQty, showToast])
+  }, [livePrerequisites, products, setQty, showToast, cfg, setBuildContext, setQuoteForm])
 
   const loadQuotes = useCallback(async () => {
     setQuotesLoading(true)
     const { data, error } = await supabase.from('quotes').select('*, quote_items(*)').order('created_at', { ascending: false })
     if (error) showToast('Failed to load quotes', 'error')
-    else setQuotes(data || [])
+    else setAllQuotes(data || [])
     setQuotesLoading(false)
   }, [showToast])
 
@@ -362,7 +416,7 @@ export default function App() {
     setExtraCosts({})
     setBuildContext(EMPTY_CONTEXT)
     setEditingQuote(null)
-  }, [])
+  }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote])
 
   // asNew: when editing, save a copy instead of overwriting the original
   const saveQuote = async (formData: QuoteFormData, asNew = false): Promise<boolean> => {
@@ -418,7 +472,7 @@ export default function App() {
     const updating = editingQuote != null && !asNew
     const { data: quoteData, error: quoteError } = updating
       ? await supabase.from('quotes').update(quoteRow).eq('id', editingQuote.id).select().single()
-      : await supabase.from('quotes').insert({ ...quoteRow, status: 'draft' }).select().single()
+      : await supabase.from('quotes').insert({ ...quoteRow, ...sectionInsert(cfg), status: 'draft' }).select().single()
 
     if (quoteError || !quoteData) {
       console.error('Saving quote failed', quoteError)
@@ -532,14 +586,14 @@ export default function App() {
   const updateQuoteStatus = async (quoteId: string, status: string) => {
     const { error } = await supabase.from('quotes').update({ status }).eq('id', quoteId)
     if (error) showToast('Failed to update status', 'error')
-    else setQuotes((prev) => prev.map((q) => q.id === quoteId ? { ...q, status: status as Quote['status'] } : q))
+    else setAllQuotes((prev) => prev.map((q) => q.id === quoteId ? { ...q, status: status as Quote['status'] } : q))
   }
 
   const deleteQuote = async (quoteId: string) => {
     const { error } = await supabase.from('quotes').delete().eq('id', quoteId)
     if (error) showToast('Failed to delete quote', 'error')
     else {
-      setQuotes((prev) => prev.filter((q) => q.id !== quoteId))
+      setAllQuotes((prev) => prev.filter((q) => q.id !== quoteId))
       // Nothing left to update, so a save from the builder becomes a new quote
       if (editingQuote?.id === quoteId) setEditingQuote(null)
       showToast('Quote deleted')
@@ -568,14 +622,20 @@ export default function App() {
       const found = contextFromText(`${variant.label} ${variant.part_number_suffix ?? ''}`)
       if (Object.keys(found).length > 0) setBuildContext((ctx) => mergeContext(ctx, found))
     }
-  }, [products, variants])
+  }, [products, variants, setVariantSelections, setBuildContext])
 
   const activeCount = Object.entries(extrasResult.effectiveQty).filter(([id, q]) => q > 0 && productIds.has(id)).length
 
   return (
-    <>
-      <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} />
+    <SectionContext.Provider value={cfg}>
+      <Header view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} onLogout={handleLogout} activeCount={activeCount} stepMode={stepMode} onToggleStepMode={toggleStepMode} subtitle={cfg.subtitle} />
       <main className="main">
+        {isAdmin && view !== 'requests' && <SectionSwitch section={activeSection} onChange={changeSection} />}
+        {view === 'builder' && activeSection === 'topter' && !productsLoading && products.length === 0 && (
+          <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 13, color: 'var(--text-2)', borderColor: 'var(--warning)' }}>
+            No TopTer parts yet. Run <strong>supabase/topter-section.sql</strong> in the Supabase SQL Editor, then reload this page.
+          </div>
+        )}
         {view === 'builder' && <PricesReviewed date={settings.prices_reviewed_at} />}
         {view === 'builder' && (() => {
           const builderProps = {
@@ -613,13 +673,15 @@ export default function App() {
             onMoveExtra: moveExtra,
             reordering,
           }
-          return stepMode ? <StepBuilder {...builderProps} /> : <QuoteBuilder {...builderProps} />
+          if (!stepMode) return <QuoteBuilder key={activeSection} {...builderProps} />
+          return activeSection === 'topter' ? <TopterStepBuilder {...builderProps} /> : <StepBuilder {...builderProps} />
         })()}
         {view === 'quotes' && (
           <SavedQuotes quotes={quotes} loading={quotesLoading} onUpdateStatus={updateQuoteStatus} onDelete={deleteQuote} onEdit={editQuote} isAdmin={isAdmin} />
         )}
         {view === 'admin' && isAdmin && (
           <AdminPanel
+            key={activeSection}
             products={products} presets={presets} settings={settings}
             variants={variants} prerequisites={prerequisites}
             onRefreshProducts={loadProducts} onRefreshPresets={loadPresets}
@@ -637,6 +699,6 @@ export default function App() {
       <BottomNav view={view} setView={setView} isAdmin={isAdmin} onAdminNav={handleAdminNav} activeCount={activeCount} />
       {showAdminLogin && <AdminLogin onClose={() => setShowAdminLogin(false)} showToast={showToast} />}
       {toast && <Toast message={toast.message} type={toast.type} />}
-    </>
+    </SectionContext.Provider>
   )
 }

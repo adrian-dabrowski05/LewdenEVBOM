@@ -7,6 +7,13 @@ export type Category =
   | 'Outgoing'
   | 'Ancillary Equipment'
   | 'Extras'
+  // TopTer section
+  | 'Enclosures'
+  | 'Fixed sockets'
+  | 'Interlocked sockets'
+  | 'Domestic sockets'
+  | 'Flanges & covers'
+  | 'Circuit protection'
 
 export const CATEGORIES: Category[] = [
   'Steelworks',
@@ -19,8 +26,32 @@ export const CATEGORIES: Category[] = [
   'Extras',
 ]
 
+// TopTer section categories (Accessories and Extras work the same as in EV)
+export const TOPTER_CATEGORIES: Category[] = [
+  'Enclosures',
+  'Fixed sockets',
+  'Interlocked sockets',
+  'Domestic sockets',
+  'Flanges & covers',
+  'Circuit protection',
+  'Accessories',
+  'Extras',
+]
+
 // Products in this category are only added to a quote through an Extra
 export const EXTRAS_CATEGORY: Category = 'Extras'
+
+// Which quoting section a product, preset, extra or quote belongs to.
+// Rows saved before sections existed have no value and count as 'ev'.
+export type Section = 'ev' | 'topter'
+
+// TopTer capacity: what a board or box provides and what a socket, flange or
+// DIN device uses, e.g. { provides: { sockets: 4, f65: 4, din: 10 } }
+export interface CapacityMap { [slot: string]: number }
+export interface ProductCapacity {
+  provides?: CapacityMap
+  uses?: CapacityMap
+}
 
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined'
 
@@ -33,6 +64,8 @@ export interface Product {
   notes: string | null
   sort_order: number
   is_active: boolean
+  section?: Section | null
+  capacity?: ProductCapacity | null
   created_at: string
   updated_at: string
 }
@@ -83,6 +116,7 @@ export interface Quote {
   labour_total: number
   carriage?: number | null   // charged at face value, added after uplift and labour
   status: QuoteStatus
+  section?: Section | null
   extras?: QuoteExtra[] | null
   build?: QuoteBuild | null
   created_at: string
@@ -126,6 +160,7 @@ export interface Preset {
   description: string | null
   default_labour_minutes: number | null
   default_labour_rate_per_min: number | null
+  section?: Section | null
   created_at: string
   updated_at: string
   preset_items?: PresetItem[]
@@ -203,6 +238,7 @@ export interface Extra {
   rep_priced?: boolean       // rep types in a cost (e.g. non-standard colour), added at face value
   rep_cost_uplift?: boolean  // that cost counts as hardware: it goes in materials and gets the hardware uplift
   sort_order?: number | null // order in the builders, set by the admin (falls back to number)
+  section?: Section | null
   created_at: string
   updated_at: string
   extra_items?: ExtraItem[]

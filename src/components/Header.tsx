@@ -9,9 +9,10 @@ interface Props {
   activeCount: number
   stepMode: boolean
   onToggleStepMode: () => void
+  subtitle: string   // the section being quoted, e.g. "EV feeder pillars"
 }
 
-export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, activeCount, stepMode, onToggleStepMode }: Props) {
+export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, activeCount, stepMode, onToggleStepMode, subtitle }: Props) {
   const logoSrc = `${(import.meta as any).env.BASE_URL}logo.png`
 
   return (
@@ -24,8 +25,8 @@ export default function Header({ view, setView, isAdmin, onAdminNav, onLogout, a
           onError={(e) => { e.currentTarget.style.display = 'none' }}
         />
         <div>
-          <div className="header-title">EV BOM Calculator</div>
-          <div className="header-sub">Lewden · Pillar quotation tool</div>
+          <div className="header-title">Lewden Quoting Tool</div>
+          <div className="header-sub">{subtitle}</div>
         </div>
       </div>
 

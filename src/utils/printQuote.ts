@@ -1,6 +1,7 @@
-import type { Quote, QuoteExtra } from '../types'
+import type { Quote, QuoteExtra, Section } from '../types'
 import { savedQuotePricing } from './pricing'
 import type { QuotePricing } from './pricing'
+import { SECTIONS, sectionOf } from './sections'
 
 interface PrintItem {
   description: string
@@ -27,6 +28,7 @@ interface PrintQuoteOptions {
   pricing: QuotePricing   // factory cost, gross profit, quote price, rebate, total quote
   baseUrl: string
   extras?: QuoteExtra[]
+  section?: Section   // heading and footer; EV when not given
 }
 
 // Rep-priced extras that count as hardware (e.g. earth bar) have no part line of their
@@ -49,6 +51,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
     labourMinutes, labourRatePerMin, labourTotal, pricing, baseUrl,
   } = opts
   const extras = opts.extras ?? []
+  const sectionCfg = SECTIONS[opts.section ?? 'ev']
   const extrasLabour = extras.reduce((sum, e) => sum + (Number(e.labour_minutes) || 0), 0)
 
   const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : '—'
@@ -170,7 +173,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
       <div class="logo-fallback">Lewden</div>
     </div>
     <div class="doc-title">
-      <h1>EV Pillar Quotation</h1>
+      <h1>${sectionCfg.quoteTitle}</h1>
       <div class="ref">Ref: ${ref}</div>
       <div class="date">Date: ${date}</div>
     </div>
@@ -241,7 +244,7 @@ function buildPrintWindow(opts: PrintQuoteOptions) {
   </table>
 
   <div class="footer">
-    <div>Lewden · EV Pillar Quotation Tool</div>
+    <div>Lewden · ${sectionCfg.toolName}</div>
     <div>Generated ${date}</div>
   </div>
 
@@ -265,6 +268,7 @@ export interface PrintFromBuilderOptions {
   pricing: QuotePricing   // factory cost, gross profit, quote price, rebate, total quote
   baseUrl: string
   extras?: QuoteExtra[]
+  section?: Section
 }
 
 export function printQuote(opts: PrintFromBuilderOptions) {
@@ -284,6 +288,7 @@ export function printQuote(opts: PrintFromBuilderOptions) {
     pricing: opts.pricing,
     baseUrl: opts.baseUrl,
     extras: opts.extras,
+    section: opts.section,
   })
   openPrint(html)
 }
@@ -315,6 +320,7 @@ export function printSavedQuote(quote: Quote, baseUrl: string) {
     pricing: savedQuotePricing(quote),
     baseUrl,
     extras: quote.extras ?? [],
+    section: sectionOf(quote),
   })
   openPrint(html)
 }
@@ -329,6 +335,7 @@ export function printBOM(quote: Quote, baseUrl: string) {
   }))
 
   const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+  const sectionCfg = SECTIONS[sectionOf(quote)]
 
   const itemRows = items.map((item) => `
     <tr>
@@ -426,7 +433,7 @@ export function printBOM(quote: Quote, baseUrl: string) {
   </table>
 
   <div class="footer">
-    <div>Lewden · EV Pillar Quotation Tool · Bill of Materials</div>
+    <div>Lewden · ${sectionCfg.toolName} · Bill of Materials</div>
     <div>${date}</div>
   </div>
 </div>
