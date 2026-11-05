@@ -136,7 +136,7 @@ export default function TopterDesigner({
     rows: d.rows.filter((r) => r.boxes.length > 0).map((r) => ({ ...r, boxes: r.boxes.map((b, i) => (i === 0 && b.joinedLeft ? { ...b, joinedLeft: false } : b)) })),
   })
 
-  // Joints that need asking: both boxes are distribution boards
+  // Joints that need asking: both boxes can be joined
   const askable = (d: TopterDesign, rightUid: string): boolean => {
     const at = findBox(d, rightUid)
     if (!at || at.index === 0) return false
@@ -370,7 +370,7 @@ export default function TopterDesigner({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); if (canJoin) setJoined(right.uid, !joined) }}
-          title={!canJoin ? 'Only distribution boards can be joined' : joined ? 'Joined into one assembly. Click to keep them separate.' : 'Separate boxes. Click to join them.'}
+          title={!canJoin ? '63A interlock boxes can\'t be joined' : joined ? 'Joined into one assembly. Click to keep them separate.' : 'Separate boxes. Click to join them.'}
           style={{ position: 'absolute', top: '50%', left: 0, transform: 'translate(-50%, -50%)', whiteSpace: 'nowrap', padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, fontFamily: 'inherit', cursor: canJoin ? 'pointer' : 'default', border: `1.5px solid ${joined ? 'var(--brand)' : 'var(--border-strong)'}`, background: joined ? 'var(--brand)' : 'var(--surface)', color: joined ? '#fff' : 'var(--text-3)', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}
         >
           {joined ? '⛓ Joined' : canJoin ? 'Separate' : '—'}
