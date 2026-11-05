@@ -1,8 +1,7 @@
 import type { Section } from '../types'
 import { SECTION_LIST } from '../utils/sections'
 
-// Admin only (for now): picks which section the builder, saved quotes and admin
-// work on. Everyone else only ever sees EV feeder pillars.
+// Picks which section the builder, saved quotes and admin work on.
 export default function SectionSwitch({ section, onChange }: { section: Section; onChange: (s: Section) => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -23,11 +22,6 @@ export default function SectionSwitch({ section, onChange }: { section: Section;
           )
         })}
       </div>
-      {section === 'topter' && (
-        <span style={{ fontSize: 12, color: 'var(--secondary-text)', background: 'var(--secondary-light)', border: '1px solid var(--secondary)', borderRadius: 99, padding: '3px 10px' }}>
-          Admin only: hidden from everyone else for now
-        </span>
-      )}
     </div>
   )
 }
