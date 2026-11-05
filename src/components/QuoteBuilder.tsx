@@ -46,6 +46,8 @@ interface Props {
   extraCosts: ExtraCostMap
   onSetExtraCost: (extraId: string, value: string) => void
   onClearExtras: () => void
+  onClearQuote: () => void   // clears the whole quote back to the section's defaults
+  canClear: boolean
   extrasResult: ExtrasResult
   buildContext: BuildContext
   setBuildContext: (ctx: BuildContext) => void
@@ -657,7 +659,7 @@ export default function QuoteBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext, setBuildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearQuote, canClear, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering,
 }: Props) {
@@ -759,11 +761,6 @@ export default function QuoteBuilder({
 
   // TopTer: slots used beyond what the boards on the quote provide
   const overCapacity = cfg.usesCapacity ? capacityUsage(products, finalQty).filter((l) => l.over) : []
-
-  const handleClear = () => {
-    if (activeCount === 0) return
-    if (confirm('Clear all quantities and extras?')) { products.forEach((p) => setQty(p.id, 0)); onClearExtras() }
-  }
 
   const openSaveModal = () => {
     if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
@@ -1191,7 +1188,7 @@ export default function QuoteBuilder({
           {overCapacity.length > 0 && <div style={{ fontSize: 11, color: 'var(--secondary)', fontWeight: 600, marginTop: 2 }}>⚠ Over board capacity: {overCapacity.map((l) => l.label.toLowerCase()).join(', ')}</div>}
         </div>
         <div className="total-bar-actions">
-          {activeCount > 0 && <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
+          {canClear && <button className="btn btn-ghost" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={onClearQuote}>Clear</button>}
           <button className="btn" style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }} onClick={handlePdf}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
             PDF

@@ -451,6 +451,25 @@ export default function App() {
     setDesign(EMPTY_DESIGN)
   }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote, setDesign])
 
+  // Anything on the quote worth clearing: parts, extras, any quote detail
+  // (customer, reference, labour, uplift, carriage, GP, rebate), the EV
+  // rating/material/size dropdowns or a designer layout
+  const quoteHasContent = Object.keys(quantities).length > 0 || selectedExtras.size > 0
+    || Object.values(quoteForm).some((v) => String(v ?? '').trim() !== '')
+    || JSON.stringify(buildContext) !== JSON.stringify(EMPTY_CONTEXT)
+    || design.rows.length > 0
+
+  // The Clear button in every builder: the whole quote goes back to this
+  // section's defaults. Uplift and labour rate fall back to the Admin settings
+  // because their boxes are left empty. When editing a saved quote this also
+  // stops editing; the saved quote itself is not changed.
+  const clearQuote = () => {
+    if (!quoteHasContent) return
+    const msg = 'Clear the whole quote? Parts, extras, labour, hardware uplift, carriage and all quote details go back to the defaults.'
+      + (editingQuote ? `\n\nThis also stops editing "${editingQuote.project_name}". The saved quote is not changed.` : '')
+    if (confirm(msg)) resetBuilder()
+  }
+
   // Clearing the quote in the list or step builder also empties the designer
   useEffect(() => {
     if (design.rows.length > 0 && Object.keys(quantities).length === 0) setDesign(EMPTY_DESIGN)
@@ -705,6 +724,8 @@ export default function App() {
             extraCosts,
             onSetExtraCost: setExtraCost,
             onClearExtras: clearExtras,
+            onClearQuote: clearQuote,
+            canClear: quoteHasContent,
             extrasResult,
             buildContext,
             setBuildContext,
@@ -723,6 +744,7 @@ export default function App() {
                 design={design} setDesign={setDesign}
                 quoteForm={quoteForm} settings={settings} extrasResult={extrasResult}
                 showToast={showToast} editingQuote={editingQuote} onCancelEdit={cancelEdit}
+                onClearQuote={clearQuote} canClear={quoteHasContent}
                 onReview={openReview}
               />
             )

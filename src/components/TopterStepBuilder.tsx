@@ -47,6 +47,8 @@ interface Props {
   extraCosts: ExtraCostMap
   onSetExtraCost: (extraId: string, value: string) => void
   onClearExtras: () => void
+  onClearQuote: () => void   // clears the whole quote back to the section's defaults
+  canClear: boolean
   extrasResult: ExtrasResult
   buildContext: BuildContext
   setBuildContext: (ctx: BuildContext) => void
@@ -179,7 +181,7 @@ export default function TopterStepBuilder({
   quantities, setQty, variantSelections, setVariantSelection,
   quoteForm, setQuoteForm, onSave, showToast,
   presets, onApplyPreset, settings,
-  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearExtras, extrasResult, buildContext,
+  extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearQuote, canClear, extrasResult, buildContext,
   editingQuote, onCancelEdit,
   isAdmin, onMoveProduct, onMoveExtra, reordering, startAtReview = false,
 }: Props) {
@@ -285,11 +287,6 @@ export default function TopterStepBuilder({
   const back = () => { if (!isFirst) goToStep(stepIdx - 1) }
 
   // ── Actions ──
-  const handleClear = () => {
-    if (activeCount === 0 && selectedExtras.size === 0) return
-    if (confirm('Clear all quantities and extras?')) { products.forEach((p) => setQty(p.id, 0)); onClearExtras() }
-  }
-
   const handleSave = async (asNew = false) => {
     if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
     if (!quoteForm.project_name.trim()) { showToast('Project name is required', 'error'); return }
@@ -677,7 +674,7 @@ export default function TopterStepBuilder({
           {overCapacity.length > 0 && <div style={{ fontSize: 11, color: 'var(--secondary)', fontWeight: 600, marginTop: 2 }}>⚠ Over board capacity</div>}
         </div>
         <div className="total-bar-actions">
-          {(activeCount > 0 || selectedExtras.size > 0) && <button className="btn btn-ghost hide-mobile" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={handleClear}>Clear</button>}
+          {canClear && <button className="btn btn-ghost hide-mobile" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={onClearQuote}>Clear</button>}
           {!isFirst && <button className="btn" style={{ background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#fff' }} onClick={back}>Back</button>}
           {!isLast && <button className="btn btn-secondary" onClick={next}>Next: {STEPS[stepIdx + 1].label}</button>}
           {isLast && <button className="btn btn-secondary" onClick={() => handleSave()} disabled={saving}>{saving ? 'Saving…' : editingQuote ? 'Update quote' : 'Save quote'}</button>}
