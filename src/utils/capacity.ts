@@ -52,7 +52,14 @@ export interface CapacityLine {
   provided: number
   used: number
   over: boolean
+  // Seats of this flange size are left, but every socket position is taken, so
+  // nothing more of this size can go in (e.g. a 2-socket flange that also has an
+  // 88x100 seat, once both 65x83 seats are filled)
+  full?: boolean
 }
+
+// Flange seat sizes that also need a socket position
+const SEAT_KEYS = ['f65', 'f88', 'f100']
 
 // Totals for the parts on the quote. Only slots something provides or uses are listed.
 export function capacityUsage(products: Product[], qty: QuantityMap): CapacityLine[] {
@@ -68,10 +75,12 @@ export function capacityUsage(products: Product[], qty: QuantityMap): CapacityLi
   const keys = Array.from(new Set([...Object.keys(provided), ...Object.keys(used)]))
   const order = (k: string) => { const i = SLOTS.findIndex((s) => s.key === k); return i === -1 ? SLOTS.length : i }
   keys.sort((a, b) => order(a) - order(b) || a.localeCompare(b))
+  const socketsLeft = (provided.sockets ?? 0) - (used.sockets ?? 0)
   return keys.map((key) => {
     const p = provided[key] ?? 0
     const u = used[key] ?? 0
-    return { key, label: SLOT_LABELS[key] ?? key, provided: p, used: u, over: u > p }
+    const full = SEAT_KEYS.includes(key) && 'sockets' in provided && socketsLeft <= 0 && u < p
+    return { key, label: SLOT_LABELS[key] ?? key, provided: p, used: u, over: u > p, ...(full ? { full } : {}) }
   })
 }
 
