@@ -15,6 +15,7 @@ export const SLOTS: { key: string; label: string; hint: string }[] = [
   { key: 'switched', label: 'Switched socket seats', hint: '16A and 32A interlocked sockets, or a 103x230 flange' },
   { key: 'seat115', label: '115x290 seats (63A series boards)', hint: '63A interlocked sockets, or a 115x290 flange / adapter' },
   { key: 'int50', label: '50x50 domestic socket seats', hint: 'International 50x50 domestic sockets' },
+  { key: 'domo', label: 'domoTER modules', hint: 'domoTER devices, in a domoTER cap (P579847 or P579860 hold 2 modules each)' },
   { key: 'din', label: 'DIN modules', hint: 'MCBs, RCBOs, RCCBs, main switches and other DIN rail devices' },
 ]
 
@@ -83,6 +84,7 @@ const SHORT: Record<string, [string, string]> = {
   switched: ['switched-socket seat', 'switched-socket seats'],
   seat115: ['115x290 seat', '115x290 seats'],
   int50: ['50x50 socket seat', '50x50 socket seats'],
+  domo: ['domoTER module', 'domoTER modules'],
   din: ['DIN module', 'DIN modules'],
 }
 

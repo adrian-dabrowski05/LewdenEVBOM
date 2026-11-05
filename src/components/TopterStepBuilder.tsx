@@ -9,7 +9,7 @@ import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult } from '../utils/extras'
 import { toQuoteExtras } from '../utils/extras'
 import { quotePricing } from '../utils/pricing'
-import { capacityUsage } from '../utils/capacity'
+import { capacityUsage, readCapacity } from '../utils/capacity'
 import type { EditingQuote } from '../App'
 import { Stepper, qtyStep, PresetsBar, ExtraRow, getDisplayPartNumber, fmt, MoveButtons, ReorderToggle, ReorderBanner, ProfitRebateRows, IncompatNote, IncompatBanner } from './QuoteBuilder'
 import CapacityPanel, { CapacityNote } from './CapacityPanel'
@@ -107,6 +107,7 @@ const PROTECTION_GROUPS: [string, RegExp][] = [
 const SOCKET_GROUPS: [string, (p: Product) => boolean][] = [
   ['Fixed sockets for boards', (p) => p.category === 'Fixed sockets' && !/wall-mounted|compact panel/i.test(p.description)],
   ['Interlocked sockets', (p) => p.category === 'Interlocked sockets'],
+  ['domoTER devices (fit in a domoTER cap)', (p) => p.category === 'Domestic sockets' && (!!readCapacity(p.capacity).uses?.domo || /^domoTER (?!caps)/i.test(p.range_name ?? ''))],
   ['Domestic sockets', (p) => p.category === 'Domestic sockets'],
   ['Flanges & covers', (p) => p.category === 'Flanges & covers'],
   ['Wall-mounted sockets', (p) => p.category === 'Fixed sockets' && /wall-mounted/i.test(p.description)],
