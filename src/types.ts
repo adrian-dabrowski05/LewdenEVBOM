@@ -287,6 +287,19 @@ export interface QuoteBuild {
   build_context: BuildContext
   labour_minutes: string      // rep's minutes, before extras labour
   design?: TopterDesign       // TopTer designer layout (boxes, parts in them, joints)
+  custom_items?: CustomItem[] // one-off items the rep typed in on Review & save
+}
+
+// A one-off item that isn't in the catalogue, typed in by the rep on Review & save.
+// Kept as typed so the boxes don't jump about while typing; see utils/customItems.ts.
+// It goes on the bill of materials like a part: in the materials subtotal, so it gets
+// the hardware uplift, and saved as a quote line with no product.
+export interface CustomItem {
+  id: string
+  description: string
+  part_number: string
+  cost: string       // £ each, blank = 0
+  quantity: string   // blank = 1
 }
 
 // ── TopTer box designer ───────────────────────────────────────

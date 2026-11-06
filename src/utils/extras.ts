@@ -1,4 +1,5 @@
 import type { Extra, ExtraItem, BuildContext, CabinetMaterial, QuantityMap, Preset, Product, ExtraCountMap, ExtraCostMap, QuoteExtra } from '../types'
+import type { CustomLine } from './customItems'
 
 export const MATERIAL_LABELS: Record<CabinetMaterial, string> = {
   mild_steel: 'Mild steel (Zintec)',
@@ -113,7 +114,9 @@ export interface ExtrasResult {
   delta: QuantityMap          // change made by extras per product (+/-)
   labourMinutes: number
   repCost: number             // rep-entered extra costs added at face value (no uplift, no labour)
-  repHardwareCost: number     // rep-entered extra costs that count as hardware (in materials, so they get the uplift)
+  repHardwareCost: number     // rep-entered costs that count as hardware (in materials, so they get the uplift):
+                              // hardware extras plus the rep's one-off items (App adds those, see customLines)
+  customLines: CustomLine[]   // the rep's one-off items (not in the catalogue), filled in by App
 }
 
 // Turn a typed £ amount into a number (blank, bad or negative = 0)
@@ -201,5 +204,5 @@ export function computeExtras(extras: Extra[], selected: Set<string>, ctx: Build
     if (finalQty > 0) effectiveQty[id] = finalQty
   })
 
-  return { applied, effectiveQty, delta, labourMinutes, repCost, repHardwareCost }
+  return { applied, effectiveQty, delta, labourMinutes, repCost, repHardwareCost, customLines: [] }
 }

@@ -4,13 +4,14 @@ import { supabase } from './lib/supabase'
 import type {
   Product, ProductVariant, ProductPrerequisite, Quote, Preset,
   View, QuantityMap, VariantSelectionMap, AutoAddedMap, QuoteFormData, AppSettings,
-  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility, Section, TopterDesign,
+  Extra, BuildContext, ExtraCountMap, ExtraCostMap, QuoteBuild, ProductIncompatibility, Section, TopterDesign, CustomItem, QuoteItem,
 } from './types'
 import { computeExtras, contextFromPreset, contextFromSteelwork, contextFromText, mergeContext, EMPTY_CONTEXT, toQuoteExtras } from './utils/extras'
 import { quotePricing } from './utils/pricing'
 import { buildIncompatMap } from './utils/compatibility'
 import { SECTIONS, SectionContext, sectionOf, sectionInsert } from './utils/sections'
 import { EMPTY_DESIGN, readDesign } from './utils/design'
+import { customLines, customLinesTotal, readCustomItems } from './utils/customItems'
 
 // Extras show in the admin's chosen order; extras never reordered sit by their number
 const extraOrder = (e: Extra) => e.sort_order ?? e.number * 10
@@ -127,6 +128,7 @@ export default function App() {
   const [buildContext, setBuildContext] = useSectionState<BuildContext>(activeSection, sectionRef, () => EMPTY_CONTEXT)
   const [editingQuote, setEditingQuote] = useSectionState<EditingQuote | null>(activeSection, sectionRef, () => null)
   const [design, setDesign] = useSectionState<TopterDesign>(activeSection, sectionRef, () => EMPTY_DESIGN)   // TopTer box designer layout
+  const [customItems, setCustomItems] = useSectionState<CustomItem[]>(activeSection, sectionRef, () => [])   // rep's one-off items (Review & save)
 
   // Only parts still in the catalogue. A removed part can still be listed in a
   // preset, a prerequisite or an extra (removing a part only hides it, so old
@@ -326,10 +328,13 @@ export default function App() {
   const clearExtras = useCallback(() => { setSelectedExtras(new Set()); setExtraCounts({}); setExtraCosts({}) }, [setSelectedExtras, setExtraCounts, setExtraCosts])
 
   // Final BOM = rep's quantities with the ticked extras applied on top
-  const extrasResult = useMemo(
-    () => computeExtras(liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts),
-    [liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts],
-  )
+  // The rep's one-off items ride along here: their lines are listed on the BOM and their
+  // cost counts as hardware, so every builder's totals, PDF and the save include them
+  const extrasResult = useMemo(() => {
+    const result = computeExtras(liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts)
+    const lines = customLines(customItems)
+    return { ...result, customLines: lines, repHardwareCost: result.repHardwareCost + customLinesTotal(lines) }
+  }, [liveExtras, selectedExtras, buildContext, quantities, extraCounts, extraCosts, customItems])
 
   useEffect(() => { loadSettings() }, [])
   const loadSettings = async () => {
@@ -449,12 +454,13 @@ export default function App() {
     setBuildContext(EMPTY_CONTEXT)
     setEditingQuote(null)
     setDesign(EMPTY_DESIGN)
-  }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote, setDesign])
+    setCustomItems([])
+  }, [setQuantities, setVariantSelections, setAutoAdded, setQuoteForm, setSelectedExtras, setExtraCounts, setExtraCosts, setBuildContext, setEditingQuote, setDesign, setCustomItems])
 
   // Anything on the quote worth clearing: parts, extras, any quote detail
   // (customer, reference, labour, uplift, carriage, GP, rebate), the EV
-  // rating/material/size dropdowns or a designer layout
-  const quoteHasContent = Object.keys(quantities).length > 0 || selectedExtras.size > 0
+  // rating/material/size dropdowns, a designer layout or a one-off item
+  const quoteHasContent = Object.keys(quantities).length > 0 || selectedExtras.size > 0 || customItems.length > 0
     || Object.values(quoteForm).some((v) => String(v ?? '').trim() !== '')
     || JSON.stringify(buildContext) !== JSON.stringify(EMPTY_CONTEXT)
     || design.rows.length > 0
@@ -465,7 +471,7 @@ export default function App() {
   // stops editing; the saved quote itself is not changed.
   const clearQuote = () => {
     if (!quoteHasContent) return
-    const msg = 'Clear the whole quote? Parts, extras, labour, hardware uplift, carriage and all quote details go back to the defaults.'
+    const msg = 'Clear the whole quote? Parts, extras, items not on the system, labour, hardware uplift, carriage and all quote details go back to the defaults.'
       + (editingQuote ? `\n\nThis also stops editing "${editingQuote.project_name}". The saved quote is not changed.` : '')
     if (confirm(msg)) resetBuilder()
   }
@@ -479,7 +485,8 @@ export default function App() {
   const saveQuote = async (formData: QuoteFormData, asNew = false): Promise<boolean> => {
     const finalQty = extrasResult.effectiveQty
     const activeItems = products.filter((p) => (finalQty[p.id] ?? 0) > 0)
-    if (activeItems.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
+    const oneOffs = extrasResult.customLines
+    if (activeItems.length === 0 && oneOffs.length === 0) { showToast('Add at least one item before saving', 'error'); return false }
 
     const materialsSubtotal = activeItems.reduce((sum, p) => sum + (p.factory_cost != null ? p.factory_cost * (finalQty[p.id] ?? 0) : 0), 0)
     + extrasResult.repHardwareCost   // rep-entered extra costs that count as hardware
@@ -505,6 +512,7 @@ export default function App() {
       labour_minutes: formData.labour_minutes,
       // TopTer: the designer's boxes, so editing the quote brings the layout back
       ...(cfg.key === 'topter' && design.rows.length > 0 ? { design } : {}),
+      ...(customItems.length > 0 ? { custom_items: customItems } : {}),
     }
 
     const quoteRow = {
@@ -539,7 +547,7 @@ export default function App() {
       return false
     }
 
-    const itemsToInsert = activeItems.map((p) => {
+    const itemsToInsert: Omit<QuoteItem, 'id'>[] = activeItems.map((p) => {
       const selectedVariantId = variantSelections[p.id] ?? null
       const selectedVariant = selectedVariantId ? variants.find((v) => v.id === selectedVariantId) : null
       return {
@@ -554,6 +562,18 @@ export default function App() {
         variant_label: selectedVariant?.label ?? null,
       }
     })
+    // One-off items typed in by the rep: quote lines with no product behind them
+    itemsToInsert.push(...oneOffs.map((line) => ({
+      quote_id: quoteData.id,
+      product_id: null,
+      description: line.description,
+      part_number: line.part_number,
+      factory_cost: line.factory_cost,
+      quantity: line.quantity,
+      line_total: line.line_total,
+      variant_id: null,
+      variant_label: null,
+    })))
 
     // Note the old lines before adding the new ones, so only those get removed afterwards
     let oldItemIds: string[] = []
@@ -586,7 +606,7 @@ export default function App() {
 
   // Put a saved quote back into the builder
   const editQuote = (quote: Quote) => {
-    const hasWork = Object.keys(quantities).length > 0 || selectedExtras.size > 0
+    const hasWork = Object.keys(quantities).length > 0 || selectedExtras.size > 0 || customItems.length > 0
     if (hasWork && editingQuote?.id !== quote.id && !confirm('Replace what is in the builder with this quote?')) return
 
     const productIds = new Set(products.map((p) => p.id))
@@ -619,6 +639,7 @@ export default function App() {
     setExtraCosts(build?.extra_costs ?? {})
     setBuildContext(build?.build_context ?? EMPTY_CONTEXT)
     setDesign(readDesign(build?.design))
+    setCustomItems(readCustomItems(build?.custom_items))
     setQuoteForm({
       project_name: quote.project_name,
       customer_name: quote.customer_name ?? '',
@@ -735,6 +756,8 @@ export default function App() {
             onMoveProduct: moveProduct,
             onMoveExtra: moveExtra,
             reordering,
+            customItems,
+            setCustomItems,
           }
           if (activeSection === 'topter' && designerOn) {
             return (

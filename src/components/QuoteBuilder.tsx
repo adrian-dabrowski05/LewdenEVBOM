@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import type {
   Product, ProductVariant, ProductPrerequisite, Preset, PresetConfiguration,
   QuantityMap, VariantSelectionMap, AutoAddedMap,
-  QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial, ExtraCostMap,
+  QuoteFormData, AppSettings, Extra, BuildContext, CabinetMaterial, ExtraCostMap, CustomItem,
 } from '../types'
 import { EXTRAS_CATEGORY } from '../types'
 import SearchBar from './SearchBar'
@@ -15,6 +15,7 @@ import { capacityUsage } from '../utils/capacity'
 import { printQuote } from '../utils/printQuote'
 import type { ExtrasResult, AppliedExtra } from '../utils/extras'
 import type { EditingQuote } from '../App'
+import { CustomItemsCard, customPrintItems } from './CustomItems'
 import { quotePricing, pctInputOk, MAX_GP_PCT, GP_MODE } from '../utils/pricing'
 import type { QuotePricing } from '../utils/pricing'
 import { extraUnavailableReason, toQuoteExtras, MATERIAL_LABELS, RATING_OPTIONS, SIZE_OPTIONS } from '../utils/extras'
@@ -57,6 +58,8 @@ interface Props {
   onMoveProduct: (productId: string, groupIds: string[], dir: -1 | 1) => void
   onMoveExtra: (extraId: string, groupIds: string[], dir: -1 | 1) => void
   reordering: boolean
+  customItems: CustomItem[]   // rep's one-off items (not in the catalogue)
+  setCustomItems: (items: CustomItem[]) => void
 }
 
 export const fmt = (n: number | null) => n != null ? `£${n.toFixed(2)}` : null
@@ -661,7 +664,7 @@ export default function QuoteBuilder({
   presets, onApplyPreset, settings,
   extras, selectedExtras, onToggleExtra, onSetExtraCount, extraCosts, onSetExtraCost, onClearQuote, canClear, extrasResult, buildContext, setBuildContext,
   editingQuote, onCancelEdit,
-  isAdmin, onMoveProduct, onMoveExtra, reordering,
+  isAdmin, onMoveProduct, onMoveExtra, reordering, customItems, setCustomItems,
 }: Props) {
   const cfg = useSectionConfig()
   const [search, setSearch] = useState('')
@@ -763,7 +766,7 @@ export default function QuoteBuilder({
   const overCapacity = cfg.usesCapacity ? capacityUsage(products, finalQty).filter((l) => l.over) : []
 
   const openSaveModal = () => {
-    if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
+    if (activeCount === 0 && extrasResult.customLines.length === 0) { showToast('Add at least one item first', 'error'); return }
     setSaveForm(quoteForm)
     setShowSaveModal(true)
   }
@@ -793,7 +796,7 @@ export default function QuoteBuilder({
   }
 
   const handlePdf = () => {
-    if (activeCount === 0) { showToast('Add at least one item first', 'error'); return }
+    if (activeCount === 0 && extrasResult.customLines.length === 0) { showToast('Add at least one item first', 'error'); return }
     printQuote({
       form: { project_name: quoteForm.project_name, customer_name: quoteForm.customer_name, mo_number: quoteForm.mo_number, notes: quoteForm.notes },
       items: activeItems.map((p) => {
@@ -807,7 +810,7 @@ export default function QuoteBuilder({
           line_total: p.factory_cost != null ? p.factory_cost * finalQty[p.id] : null,
           variant_label: selectedVariant?.label ?? null,
         }
-      }),
+      }).concat(customPrintItems(extrasResult.customLines)),   // rep's one-off items
       extras: toQuoteExtras(extrasResult.applied),
       materialsSubtotal, hardwareUpliftPct: upliftPct, hardwareUpliftAmount,
       labourMinutes, labourRatePerMin: labourRate, labourTotal, carriage, pricing,
@@ -1139,7 +1142,11 @@ export default function QuoteBuilder({
         )
       })}
 
-      {activeCount > 0 && (
+      <div style={{ marginTop: 16 }}>
+        <CustomItemsCard items={customItems} setItems={setCustomItems} />
+      </div>
+
+      {(activeCount > 0 || extrasResult.customLines.length > 0) && (
         <div className="card" style={{ marginTop: 16, padding: '14px 16px' }}>
           <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-3)', marginBottom: 10 }}>Cost breakdown</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1203,7 +1210,7 @@ export default function QuoteBuilder({
             <div className="modal-handle" />
             <h2 style={{ marginBottom: 4 }}>{editingQuote ? 'Update quote' : 'Save quote'}</h2>
             <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: missingVariants.length > 0 || overCapacity.length > 0 ? 10 : 20 }}>
-              {activeCount} item{activeCount !== 1 ? 's' : ''} · factory cost £{factoryCost.toFixed(2)} · total quote £{pricing.totalQuote.toFixed(2)}
+              {activeCount + extrasResult.customLines.length} item{activeCount + extrasResult.customLines.length !== 1 ? 's' : ''} · factory cost £{factoryCost.toFixed(2)} · total quote £{pricing.totalQuote.toFixed(2)}
             </p>
             {missingVariants.length > 0 && (
               <div style={{ padding: '8px 12px', background: 'var(--warning-bg)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--warning)', marginBottom: 16 }}>
