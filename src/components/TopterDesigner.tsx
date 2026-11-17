@@ -8,6 +8,7 @@ import { capacityUsage, capacityText, readCapacity } from '../utils/capacity'
 import {
   JOIN_PARTS, isBox, isJoinable, designCounts, missingJoinParts, jointCount, assemblies, newUid,
   boxShape, allSeats, occupancy, spanAt, fitOf, fitHint, withChildren, dinSpace, partSeats,
+  lidProblem, lidWarnings, placingAmpsOf,
   voltColour, ampsOf, dinLabel,
 } from '../utils/design'
 import type { Seat, BoxShape } from '../utils/design'
@@ -267,13 +268,19 @@ export default function TopterDesigner({
     const seats = allSeats(shape, box.items, productsById)
     const occ = occupancy(seats, box.items, productsById)
     const candidates = seatIds ? seatIds.map((id) => seats.find((s) => s.id === id)).filter((s): s is Seat => !!s) : seats
+    // The biggest socket in what is being placed (a moved part brings what sits on it)
+    const amps = head ? placingAmpsOf(p, moved, head.uid, productsById) : placingAmpsOf(p)
+    let lidWhy: string | null = null
     for (const s of candidates) {
       if (!spanAt(seats, occ, s, fit)) continue
+      const why = lidProblem(seats, occ, box.items, productsById, s, p, amps)
+      if (why) { lidWhy = lidWhy ?? why; continue }
       if (head) { head.seat = s.id; head.qty = 1; box.items.push(...moved) }
       else box.items.push({ uid: newUid(), productId: p.id, qty: 1, seat: s.id })
       return { next }
     }
     if (seatIds && seatIds.length === 1 && candidates[0] && occ[candidates[0].id]) return { error: 'That place is taken. Remove what is there first.' }
+    if (lidWhy) return { error: lidWhy }
     return { error: seatIds ? fitHint(fit.kind) : `No free place for it in this box. ${fitHint(fit.kind)}` }
   }
 
@@ -474,6 +481,18 @@ export default function TopterDesigner({
     return product && !isBox(product) ? fitOf(product) : null
   })()
 
+  // The part being moved, what moves with it and its biggest socket (for the lid rule on P579860)
+  const movingInfo = (() => {
+    if (!moving) return null
+    const { product, moveUid } = productOf(moving)
+    if (!product || isBox(product)) return null
+    if (!moveUid) return { product, ignore: new Set<string>(), amps: placingAmpsOf(product) }
+    for (const r of design.rows) for (const b of r.boxes) {
+      if (b.items.some((i) => i.uid === moveUid)) return { product, ignore: withChildren(b.items, moveUid), amps: placingAmpsOf(product, b.items, moveUid, productsById) }
+    }
+    return { product, ignore: new Set<string>(), amps: placingAmpsOf(product) }
+  })()
+
   const renderBox = (box: DesignBox) => {
     const p = productsById[box.productId]
     if (!p) {
@@ -502,6 +521,7 @@ export default function TopterDesigner({
     box.items.forEach((it) => { localQty[it.productId] = (localQty[it.productId] ?? 0) + it.qty })
     const localProducts = [p, ...box.items.map((i) => productsById[i.productId]).filter((x): x is Product => !!x && x.id !== p.id)].filter((x, i, a) => a.indexOf(x) === i)
     const over = capacityUsage(localProducts, localQty).filter((l) => l.over)
+    const lids = lidWarnings(seats, occ, box.items, productsById)
 
     const boxKey = `box:${box.uid}`
     const isDragged = dragging?.kind === 'box' && dragging.uid === box.uid
@@ -510,6 +530,7 @@ export default function TopterDesigner({
     const emptySeat = (seat: Seat) => {
       const key = `seat:${box.uid}:${seat.id}`
       const ok = !!movingFit && !!spanAt(seats, occ, seat, movingFit)
+        && !(movingInfo && lidProblem(seats, occ, box.items, productsById, seat, movingInfo.product, movingInfo.amps, movingInfo.ignore))
       const hot = overSpot === key
       const tall = seat.kind === 'switched' || seat.kind === 'seat115' || seat.kind === 'col63'
       return (
@@ -686,6 +707,11 @@ export default function TopterDesigner({
           </div>
         )}
         {extras.length > 0 && <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>{extras.length} part{extras.length !== 1 ? 's' : ''} with this box, not in a position</div>}
+        {lids.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 500 }}>
+            {lids.map((w) => <div key={w}>⚠ {w}</div>)}
+          </div>
+        )}
         {over.length > 0 && (
           <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 500 }}>
             {over.map((l) => <div key={l.key}>⚠ {l.label}: {l.used} / {l.provided}</div>)}
