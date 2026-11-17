@@ -274,6 +274,79 @@ export function spanAt(seats: Seat[], occ: Record<string, string>, start: Seat, 
   return run
 }
 
+// ── Parts with a lid that opens upwards ──
+// Adrian (2026-11-17): the watertight cap P579860 can only go on the bottom row,
+// and never under a socket bigger than 16A, because its lid opens upwards and
+// the bigger socket above would block it. The number is the biggest socket (in
+// amps) allowed in the position directly above.
+export const LID_PARTS: Record<string, number> = { P579860: 16 }
+
+const partNo = (p: Product | undefined) => (p?.part_number ?? '').toUpperCase()
+const ampsNum = (p: Product | undefined) => (p ? Number(ampsOf(p)) || 0 : 0)
+
+// Socket positions run top to bottom within their group (a board column, or a
+// 2-position flange); anything else (switched holes, domoTER modules) runs side by side
+const stacked = (s: Seat) => s.kind === 'fixed'
+function seatBelow(seats: Seat[], s: Seat): Seat | undefined {
+  return stacked(s) ? seats.find((x) => x.group === s.group && stacked(x) && x.index === s.index + 1) : undefined
+}
+function seatAbove(seats: Seat[], s: Seat): Seat | undefined {
+  return stacked(s) ? seats.find((x) => x.group === s.group && stacked(x) && x.index === s.index - 1) : undefined
+}
+
+// The biggest socket (amps) in an item and everything sitting on it
+function itemAmps(items: DesignItem[], uid: string, productsById: Record<string, Product>): number {
+  const ids = withChildren(items, uid)
+  return items.filter((i) => ids.has(i.uid)).reduce((m, i) => Math.max(m, ampsNum(productsById[i.productId])), 0)
+}
+
+// Why a part can't go in this seat because of a lid (null = fine).
+// placingAmps: the biggest socket in what is being placed (the part and anything on it).
+// ignore: items that are being moved, so don't count where they are now.
+export function lidProblem(
+  seats: Seat[], occ: Record<string, string>, items: DesignItem[], productsById: Record<string, Product>,
+  seat: Seat, p: Product, placingAmps: number, ignore?: Set<string>,
+): string | null {
+  if (!stacked(seat)) return null
+  const pn = partNo(p)
+  const limit = LID_PARTS[pn]
+  const holder = (s: Seat | undefined) => { const uid = s ? occ[s.id] : undefined; return uid && !ignore?.has(uid) ? items.find((i) => i.uid === uid) : undefined }
+  if (limit !== undefined) {
+    if (seatBelow(seats, seat)) return `${pn} can only go on the bottom row of a board: its lid opens upwards and the position above must stay clear of bigger sockets`
+    const above = holder(seatAbove(seats, seat))
+    if (above && itemAmps(items, above.uid, productsById) > limit) {
+      const ap = productsById[above.productId]
+      return `${pn} can't go under ${partNo(ap) || 'a socket'} (${itemAmps(items, above.uid, productsById)}A): its lid opens upwards and is blocked by a socket bigger than ${limit}A above it`
+    }
+  }
+  const below = holder(seatBelow(seats, seat))
+  const bp = below ? productsById[below.productId] : undefined
+  const belowLimit = LID_PARTS[partNo(bp)]
+  if (belowLimit !== undefined && placingAmps > belowLimit) {
+    return `A socket bigger than ${belowLimit}A can't go above ${partNo(bp)}: its lid opens upwards and would be blocked`
+  }
+  return null
+}
+
+// Lid problems already in a box (an older saved design, for example)
+export function lidWarnings(seats: Seat[], occ: Record<string, string>, items: DesignItem[], productsById: Record<string, Product>): string[] {
+  const out: string[] = []
+  items.forEach((it) => {
+    const p = productsById[it.productId]
+    if (!p || LID_PARTS[partNo(p)] === undefined || !it.seat) return
+    const seat = seats.find((s) => s.id === it.seat)
+    if (!seat) return
+    const why = lidProblem(seats, occ, items, productsById, seat, p, 0, new Set([it.uid]))
+    if (why && !out.includes(why)) out.push(why)
+  })
+  return out
+}
+
+// The biggest socket in a part, or in an item and what sits on it
+export function placingAmpsOf(p: Product, items?: DesignItem[], uid?: string, productsById?: Record<string, Product>): number {
+  return items && uid && productsById ? itemAmps(items, uid, productsById) : ampsNum(p)
+}
+
 // An item and everything sitting on it
 export function withChildren(items: DesignItem[], uid: string): Set<string> {
   const out = new Set([uid])
